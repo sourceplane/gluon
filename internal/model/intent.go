@@ -2,12 +2,12 @@ package model
 
 // Intent is the top-level CRD for declarative deployment
 type Intent struct {
-	APIVersion string               `yaml:"apiVersion" json:"apiVersion"`
-	Kind       string               `yaml:"kind" json:"kind"`
-	Metadata   Metadata             `yaml:"metadata" json:"metadata"`
-	Groups     map[string]Group     `yaml:"groups" json:"groups"`
+	APIVersion   string                 `yaml:"apiVersion" json:"apiVersion"`
+	Kind         string                 `yaml:"kind" json:"kind"`
+	Metadata     Metadata               `yaml:"metadata" json:"metadata"`
+	Groups       map[string]Group       `yaml:"groups" json:"groups"`
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
-	Components []Component          `yaml:"components" json:"components"`
+	Components   []Component            `yaml:"components" json:"components"`
 }
 
 // Metadata holds standard object metadata
@@ -46,15 +46,21 @@ type Component struct {
 	Enabled   bool                   `yaml:"enabled" json:"enabled"`
 	Path      string                 `yaml:"path" json:"path"`
 	Inputs    map[string]interface{} `yaml:"inputs" json:"inputs"`
+	Overrides ComponentOverrides     `yaml:"overrides" json:"overrides"`
 	Labels    map[string]string      `yaml:"labels" json:"labels"`
 	DependsOn []Dependency           `yaml:"dependsOn" json:"dependsOn"`
+}
+
+// ComponentOverrides defines component-specific planner overrides.
+type ComponentOverrides struct {
+	Steps []Step `yaml:"steps" json:"steps"`
 }
 
 // Dependency specifies inter-component execution constraints
 type Dependency struct {
 	Component   string `yaml:"component" json:"component"`
 	Environment string `yaml:"environment" json:"environment"`
-	Scope       string `yaml:"scope" json:"scope"` // same-environment, cross-environment
+	Scope       string `yaml:"scope" json:"scope"`         // same-environment, cross-environment
 	Condition   string `yaml:"condition" json:"condition"` // success, always, failure
 }
 
@@ -76,6 +82,7 @@ type ComponentInstance struct {
 	Path          string
 	Labels        map[string]string
 	Inputs        map[string]interface{}
+	StepOverrides []Step
 	Policies      map[string]interface{}
 	DependsOn     []ResolvedDependency
 	Enabled       bool

@@ -47,6 +47,9 @@ func NormalizeIntent(intent *model.Intent) (*model.NormalizedIntent, error) {
 		if comp.DependsOn == nil {
 			comp.DependsOn = []model.Dependency{}
 		}
+		if comp.Overrides.Steps == nil {
+			comp.Overrides.Steps = []model.Step{}
+		}
 
 		// Normalize dependencies
 		for i := range comp.DependsOn {

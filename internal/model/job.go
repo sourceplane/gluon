@@ -1,46 +1,78 @@
 package model
 
+import "strings"
+
+// StepPhase defines execution phase for a job step.
+type StepPhase string
+
+const (
+	PhasePre  StepPhase = "pre"
+	PhaseMain StepPhase = "main"
+	PhasePost StepPhase = "post"
+)
+
 // JobRegistry holds all job definitions (k8s-style declarative format)
 type JobRegistry struct {
-	APIVersion string      `yaml:"apiVersion" json:"apiVersion"`
-	Kind       string      `yaml:"kind" json:"kind"`
-	Metadata   Metadata    `yaml:"metadata" json:"metadata"`
-	Jobs       []JobSpec   `yaml:"jobs" json:"jobs"`
+	APIVersion string    `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string    `yaml:"kind" json:"kind"`
+	Metadata   Metadata  `yaml:"metadata" json:"metadata"`
+	Jobs       []JobSpec `yaml:"jobs" json:"jobs"`
 }
 
 // JobSpec defines a complete job specification with multiple steps
 type JobSpec struct {
-	Name        string            `yaml:"name" json:"name"`
-	Description string            `yaml:"description" json:"description"`
-	Timeout     string            `yaml:"timeout" json:"timeout"`
-	Retries     int               `yaml:"retries" json:"retries"`
-	Steps       []Step            `yaml:"steps" json:"steps"`
+	Name        string                 `yaml:"name" json:"name"`
+	Description string                 `yaml:"description" json:"description"`
+	Timeout     string                 `yaml:"timeout" json:"timeout"`
+	Retries     int                    `yaml:"retries" json:"retries"`
+	Steps       []Step                 `yaml:"steps" json:"steps"`
 	Inputs      map[string]interface{} `yaml:"inputs" json:"inputs"`
-	Labels      map[string]string `yaml:"labels" json:"labels"`
+	Labels      map[string]string      `yaml:"labels" json:"labels"`
 }
 
 // Step is a single execution unit within a job
 type Step struct {
 	Name      string `yaml:"name" json:"name"`
+	Phase     string `yaml:"phase,omitempty" json:"phase,omitempty"`
+	Order     int    `yaml:"order,omitempty" json:"order,omitempty"`
 	Run       string `yaml:"run" json:"run"`
 	Timeout   string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
 	Retry     int    `yaml:"retry,omitempty" json:"retry,omitempty"`
 	OnFailure string `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
 }
 
+// NormalizePhase returns a normalized phase string and defaults empty values to "main".
+func NormalizePhase(phase string) string {
+	p := strings.ToLower(strings.TrimSpace(phase))
+	if p == "" {
+		return string(PhaseMain)
+	}
+	return p
+}
+
+// IsValidPhase checks whether a phase is one of pre/main/post.
+func IsValidPhase(phase string) bool {
+	switch NormalizePhase(phase) {
+	case string(PhasePre), string(PhaseMain), string(PhasePost):
+		return true
+	default:
+		return false
+	}
+}
+
 // JobBinding is a k8s-style declarative binding between a model and its jobs
 type JobBinding struct {
-	APIVersion string            `yaml:"apiVersion" json:"apiVersion"`
-	Kind       string            `yaml:"kind" json:"kind"`
-	Metadata   Metadata          `yaml:"metadata" json:"metadata"`
-	Spec       JobBindingSpec    `yaml:"spec" json:"spec"`
+	APIVersion string         `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string         `yaml:"kind" json:"kind"`
+	Metadata   Metadata       `yaml:"metadata" json:"metadata"`
+	Spec       JobBindingSpec `yaml:"spec" json:"spec"`
 }
 
 // JobBindingSpec specifies which jobs are available for a model
 type JobBindingSpec struct {
-	Model       string       `yaml:"model" json:"model"`                 // Model name (helm, terraform, charts, etc)
-	Jobs        []JobRef     `yaml:"jobs" json:"jobs"`                   // List of available jobs
-	DefaultJob  string       `yaml:"defaultJob" json:"defaultJob"`       // Default job to execute
+	Model       string         `yaml:"model" json:"model"`           // Model name (helm, terraform, charts, etc)
+	Jobs        []JobRef       `yaml:"jobs" json:"jobs"`             // List of available jobs
+	DefaultJob  string         `yaml:"defaultJob" json:"defaultJob"` // Default job to execute
 	Constraints JobConstraints `yaml:"constraints,omitempty" json:"constraints,omitempty"`
 }
 
@@ -52,8 +84,8 @@ type JobRef struct {
 
 // JobConstraints defines constraints for job execution
 type JobConstraints struct {
-	Platforms []string `yaml:"platforms,omitempty" json:"platforms,omitempty"` // kubernetes, docker, etc
-	MinVersion string `yaml:"minVersion,omitempty" json:"minVersion,omitempty"` // Minimum tool version
+	Platforms  []string `yaml:"platforms,omitempty" json:"platforms,omitempty"`   // kubernetes, docker, etc
+	MinVersion string   `yaml:"minVersion,omitempty" json:"minVersion,omitempty"` // Minimum tool version
 }
 
 // JobInstance is a materialized job for a component in an environment
@@ -75,6 +107,8 @@ type JobInstance struct {
 // RenderedStep is a step with all templates resolved
 type RenderedStep struct {
 	Name      string `json:"name"`
+	Phase     string `json:"phase,omitempty"`
+	Order     int    `json:"order,omitempty"`
 	Run       string `json:"run"`
 	Timeout   string `json:"timeout"`
 	Retry     int    `json:"retry"`

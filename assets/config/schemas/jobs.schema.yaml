@@ -46,6 +46,16 @@ properties:
               name:
                 type: string
                 minLength: 1
+              phase:
+                type: string
+                enum:
+                  - pre
+                  - main
+                  - post
+                default: main
+              order:
+                type: integer
+                minimum: 0
               run:
                 type: string
                 minLength: 1

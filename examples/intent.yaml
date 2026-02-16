@@ -77,6 +77,13 @@ components:
     labels:
       team: platform
       tier: frontend
+    overrides:
+      steps:
+        - name: verify
+          phase: post
+          order: 10
+          run: kubectl get deployment -n platform-web-app web-app
+          onFailure: continue
     dependsOn:
       - component: common-services
         environment: ""

@@ -2,6 +2,7 @@ package planner
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"text/template"
 
@@ -10,8 +11,8 @@ import (
 
 // JobPlanner binds components to jobs and creates instances
 type JobPlanner struct {
-	compositions    map[string]*CompositionInfo // Composition -> default job info
-	templateCache   map[string]*template.Template
+	compositions  map[string]*CompositionInfo // Composition -> default job info
+	templateCache map[string]*template.Template
 }
 
 // CompositionInfo holds the default job for a composition
@@ -23,8 +24,8 @@ type CompositionInfo struct {
 // NewJobPlanner creates a new job planner from a composition registry
 func NewJobPlanner(compositions map[string]*CompositionInfo) *JobPlanner {
 	return &JobPlanner{
-		compositions:   compositions,
-		templateCache:  make(map[string]*template.Template),
+		compositions:  compositions,
+		templateCache: make(map[string]*template.Template),
 	}
 }
 
@@ -61,8 +62,10 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 				DependsOn:   make([]string, 0),
 			}
 
+			resolvedSteps := applyStepOverrides(jobDef.Steps, compInst.StepOverrides)
+
 			// Render steps with template variables
-			renderedSteps, err := jp.renderSteps(jobDef.Steps, compInst)
+			renderedSteps, err := jp.renderSteps(resolvedSteps, compInst)
 			if err != nil {
 				return nil, fmt.Errorf("failed to render steps for job %s: %w", jobID, err)
 			}
@@ -80,9 +83,14 @@ func (jp *JobPlanner) PlanJobs(instances map[string][]*model.ComponentInstance) 
 
 	return jobInstances, nil
 }
+
 // Templates are cached to avoid re-parsing identical steps across multiple instances
 func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentInstance) ([]model.RenderedStep, error) {
 	rendered := make([]model.RenderedStep, 0, len(steps))
+	sortedSteps, err := sortStepsByPhaseAndOrder(steps)
+	if err != nil {
+		return nil, err
+	}
 
 	// Build template context once
 	context := map[string]interface{}{
@@ -96,7 +104,7 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 		context[k] = v
 	}
 
-	for _, step := range steps {
+	for _, step := range sortedSteps {
 		// Use cache key: componentType:stepName (steps are unique within a job type)
 		cacheKey := fmt.Sprintf("%s:%s", compInst.Type, step.Name)
 
@@ -120,6 +128,8 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 
 		rendered = append(rendered, model.RenderedStep{
 			Name:      step.Name,
+			Phase:     model.NormalizePhase(step.Phase),
+			Order:     step.Order,
 			Run:       buf.String(),
 			Timeout:   step.Timeout,
 			Retry:     step.Retry,
@@ -128,6 +138,83 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 	}
 
 	return rendered, nil
+}
+
+func sortStepsByPhaseAndOrder(steps []model.Step) ([]model.Step, error) {
+	type indexedStep struct {
+		step  model.Step
+		index int
+	}
+
+	indexed := make([]indexedStep, 0, len(steps))
+	for i, step := range steps {
+		phase := model.NormalizePhase(step.Phase)
+		if !model.IsValidPhase(phase) {
+			return nil, fmt.Errorf("invalid step phase %q in step %s", step.Phase, step.Name)
+		}
+		step.Phase = phase
+		indexed = append(indexed, indexedStep{step: step, index: i})
+	}
+
+	sort.SliceStable(indexed, func(i, j int) bool {
+		pi := phaseRank(indexed[i].step.Phase)
+		pj := phaseRank(indexed[j].step.Phase)
+		if pi != pj {
+			return pi < pj
+		}
+		if indexed[i].step.Order != indexed[j].step.Order {
+			return indexed[i].step.Order < indexed[j].step.Order
+		}
+		return indexed[i].index < indexed[j].index
+	})
+
+	result := make([]model.Step, 0, len(indexed))
+	for _, item := range indexed {
+		result = append(result, item.step)
+	}
+
+	return result, nil
+}
+
+func phaseRank(phase string) int {
+	switch model.NormalizePhase(phase) {
+	case string(model.PhasePre):
+		return 0
+	case string(model.PhaseMain):
+		return 1
+	case string(model.PhasePost):
+		return 2
+	default:
+		return 99
+	}
+}
+
+func applyStepOverrides(base []model.Step, overrides []model.Step) []model.Step {
+	if len(overrides) == 0 {
+		return base
+	}
+
+	result := make([]model.Step, 0, len(base)+len(overrides))
+	indexByName := make(map[string]int, len(base))
+
+	for _, step := range base {
+		indexByName[step.Name] = len(result)
+		result = append(result, step)
+	}
+
+	for _, override := range overrides {
+		if idx, exists := indexByName[override.Name]; exists {
+			// Replace entirely by step name.
+			result[idx] = override
+			continue
+		}
+
+		// Allow additive override steps when name does not exist in base job.
+		indexByName[override.Name] = len(result)
+		result = append(result, override)
+	}
+
+	return result
 }
 
 // resolveDependencies sets up dependency edges between job instances

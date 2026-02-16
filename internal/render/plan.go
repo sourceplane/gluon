@@ -1,11 +1,13 @@
 package render
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/sourceplane/liteci/internal/model"
 	"gopkg.in/yaml.v3"
@@ -32,11 +34,18 @@ func (r *Renderer) RenderPlan(metadata model.Metadata, jobInstances map[string]*
 // RenderPlanWithOrder creates a plan from job instances using a caller-specified order.
 func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map[string]*model.JobInstance, jobBindings map[string]string, jobOrder []string) *model.Plan {
 	plan := &model.Plan{
-		APIVersion: "sourceplane.io/v1",
-		Kind:       "Workflow",
-		Metadata: model.Metadata{
+		APIVersion: "liteci.io/v1",
+		Kind:       "Plan",
+		Metadata: model.PlanMetadata{
 			Name:        metadata.Name,
 			Description: metadata.Description,
+			Namespace:   metadata.Namespace,
+			GeneratedAt: time.Now().UTC().Format(time.RFC3339),
+		},
+		Execution: model.PlanExecution{
+			Concurrency: 4,
+			FailFast:    true,
+			StateFile:   ".liteci-state.json",
 		},
 		Spec: model.PlanSpec{
 			JobBindings: jobBindings, // Map of model -> JobRegistry name
@@ -78,6 +87,8 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 		plan.Jobs = append(plan.Jobs, planJob)
 	}
 
+	r.attachChecksum(plan)
+
 	return plan
 }
 
@@ -85,8 +96,15 @@ func (r *Renderer) RenderPlanWithOrder(metadata model.Metadata, jobInstances map
 func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 	planSteps := make([]model.PlanStep, len(steps))
 	for i, step := range steps {
+		stepID := step.Name
+		if stepID == "" {
+			stepID = fmt.Sprintf("step-%d", i+1)
+		}
 		planSteps[i] = model.PlanStep{
+			ID:        stepID,
 			Name:      step.Name,
+			Phase:     step.Phase,
+			Order:     step.Order,
 			Run:       step.Run,
 			Timeout:   step.Timeout,
 			Retry:     step.Retry,
@@ -94,6 +112,21 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 		}
 	}
 	return planSteps
+}
+
+func (r *Renderer) attachChecksum(plan *model.Plan) {
+	if plan == nil {
+		return
+	}
+
+	clone := *plan
+	clone.Metadata.Checksum = ""
+	payload, err := json.Marshal(clone)
+	if err != nil {
+		return
+	}
+	sum := sha256.Sum256(payload)
+	plan.Metadata.Checksum = fmt.Sprintf("sha256-%x", sum)
 }
 
 // RenderJSON renders plan as JSON

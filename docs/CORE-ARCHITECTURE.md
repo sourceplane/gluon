@@ -23,6 +23,31 @@ The pipeline is intentionally split into focused packages under [internal](../in
 - [internal/planner/graph.go](../internal/planner/graph.go): cycle detection and topological sort.
 - [internal/render](../internal/render/plan.go): deterministic output rendering.
 
+## Step Phases and Ordering
+
+Job steps now support optional `phase` and `order` attributes.
+
+- `phase`: `pre`, `main`, `post` (default: `main`)
+- `order`: integer used inside each phase (default: `0`)
+
+Execution ordering is deterministic:
+
+1. `pre`
+2. `main`
+3. `post`
+
+Within each phase, steps are ordered by `order` ascending, then by declaration order.
+
+This keeps runtime execution linear while making pre/post hooks explicit and extensible.
+
+Component-level step overrides are also supported via `overrides.steps` in intent:
+
+- Match by `name`
+- Replace the base step entirely
+- If a step name does not exist in the base job, it is appended
+
+After overrides are applied, planner ordering is resolved by `phase` + `order` + declaration order.
+
 
 ## Extending the CLI with New Subcommands
 

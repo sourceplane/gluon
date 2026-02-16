@@ -30,7 +30,7 @@ var rootCmd = &cobra.Command{
 	Short: "Planner engine: Intent → Plan DAG",
 	Long:  "liteci is a schema-driven planner that compiles policy-aware intent into deterministic execution DAGs",
 	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
-		if configDir == "" {
+		if commandNeedsConfig(cmd) && configDir == "" {
 			if envConfigDir := os.Getenv("LITECI_CONFIG_DIR"); envConfigDir != "" {
 				configDir = envConfigDir
 			} else {
@@ -39,6 +39,24 @@ var rootCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+func commandNeedsConfig(cmd *cobra.Command) bool {
+	if cmd == nil {
+		return false
+	}
+
+	if cmd.Name() == "plan" || cmd.Name() == "compositions" || cmd.Name() == "composition" {
+		return true
+	}
+
+	if parent := cmd.Parent(); parent != nil {
+		if parent.Name() == "compositions" || parent.Name() == "composition" {
+			return true
+		}
+	}
+
+	return false
 }
 
 func init() {

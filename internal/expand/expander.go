@@ -49,6 +49,7 @@ func (e *Expander) Expand() (map[string][]*model.ComponentInstance, error) {
 				Type:          comp.Type,
 				Domain:        comp.Domain,
 				Labels:        comp.Labels,
+				StepOverrides: comp.Overrides.Steps,
 				Enabled:       comp.Enabled,
 			}
 

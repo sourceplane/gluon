@@ -6,31 +6,57 @@ required:
   - apiVersion
   - kind
   - metadata
+  - execution
   - jobs
 properties:
   apiVersion:
     type: string
     enum:
-      - v1
+      - liteci.io/v1
   kind:
     type: string
     enum:
-      - Workflow
+      - Plan
   metadata:
     type: object
     required:
       - name
+      - generatedAt
+      - checksum
     properties:
       name:
         type: string
       description:
         type: string
-      generatedBy:
+      namespace:
         type: string
-      version:
+      generatedAt:
         type: string
-      timestamp:
+        format: date-time
+      checksum:
         type: string
+        pattern: ^sha256-[a-f0-9]{64}$
+  execution:
+    type: object
+    required:
+      - concurrency
+      - failFast
+      - stateFile
+    properties:
+      concurrency:
+        type: integer
+        minimum: 1
+      failFast:
+        type: boolean
+      stateFile:
+        type: string
+  spec:
+    type: object
+    properties:
+      jobBindings:
+        type: object
+        additionalProperties:
+          type: string
   jobs:
     type: array
     items:
@@ -40,7 +66,6 @@ properties:
         - name
         - component
         - environment
-        - type
         - steps
       properties:
         id:
@@ -52,22 +77,35 @@ properties:
           type: string
         environment:
           type: string
-        type:
+        composition:
           type: string
-        provider:
+        jobRegistry:
           type: string
-        capability:
+        job:
+          type: string
+        path:
           type: string
         steps:
           type: array
           items:
             type: object
             required:
-              - name
+              - id
               - run
             properties:
+              id:
+                type: string
               name:
                 type: string
+              phase:
+                type: string
+                enum:
+                  - pre
+                  - main
+                  - post
+              order:
+                type: integer
+                minimum: 0
               run:
                 type: string
               timeout:
