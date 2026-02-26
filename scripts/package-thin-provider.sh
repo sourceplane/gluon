@@ -88,7 +88,7 @@ if [[ -n "$BUILD_WITH" ]]; then
       fi
 
       echo "Using GoReleaser config: $GORELEASER_CONFIG"
-      goreleaser release --clean --skip=validate --config "$GORELEASER_CONFIG"
+      goreleaser build --clean --config "$GORELEASER_CONFIG"
       ;;
     *)
       echo "Unsupported --build-with value: $BUILD_WITH" >&2
