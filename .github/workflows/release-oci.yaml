@@ -45,11 +45,12 @@ jobs:
 
       - name: Package and publish OCI artifact
         run: |
-          scripts/package-thin-provider.sh \
-            --provider thin.provider.yaml \
+          cd scripts/releaser
+          go run ./cmd/releaser \
+            --provider ../../thin.provider.yaml \
             --build-with gorelaser \
-            --dist dist \
-            --output oci \
+            --dist ../../dist \
+            --output ../../oci \
             --ref ghcr.io/${{ github.repository }}:${{ github.ref_name }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
