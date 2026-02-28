@@ -20,7 +20,11 @@ func runBuild(opts Options, manifest config.ProviderManifest) error {
 			return fmt.Errorf("goreleaser not found in PATH")
 		}
 
-		providerDir := filepath.Dir(opts.ProviderPath)
+		providerDir, err := filepath.Abs(filepath.Dir(opts.ProviderPath))
+		if err != nil {
+			return err
+		}
+
 		configPath := manifest.Goreleaser.Config
 		if configPath == "" {
 			configPath = ".goreleaser.yaml"
@@ -39,6 +43,7 @@ func runBuild(opts Options, manifest config.ProviderManifest) error {
 
 		fmt.Printf("Using GoReleaser config: %s\n", configPath)
 		cmd := exec.Command("goreleaser", "build", "--clean", "--config", configPath)
+		cmd.Dir = providerDir
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		return cmd.Run()
