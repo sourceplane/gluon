@@ -44,8 +44,10 @@ properties:
             type: object
             required:
               - name
-              - run
             properties:
+              id:
+                type: string
+                minLength: 1
               name:
                 type: string
                 minLength: 1
@@ -62,6 +64,21 @@ properties:
               run:
                 type: string
                 minLength: 1
+              use:
+                type: string
+                minLength: 1
+              with:
+                type: object
+                additionalProperties: true
+              env:
+                type: object
+                additionalProperties: true
+              shell:
+                type: string
+                minLength: 1
+              working-directory:
+                type: string
+                minLength: 1
               timeout:
                 type: string
                 pattern: ^[0-9]+(m|h|s)$
@@ -76,6 +93,11 @@ properties:
                   - stop
                   - continue
                 default: stop
+            anyOf:
+              - required:
+                  - run
+              - required:
+                  - use
         inputs:
           type: object
           additionalProperties: true

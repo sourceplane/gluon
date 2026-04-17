@@ -106,36 +106,92 @@ func (jp *JobPlanner) renderSteps(steps []model.Step, compInst *model.ComponentI
 	}
 
 	for _, step := range sortedSteps {
-		// Use cache key: componentType:stepName (steps are unique within a job type)
-		cacheKey := fmt.Sprintf("%s:%s", compInst.Type, step.Name)
-
-		// Check cache first
-		tmpl, exists := jp.templateCache[cacheKey]
-		if !exists {
-			// Parse and cache the template
-			var err error
-			tmpl, err = template.New(cacheKey).Parse(step.Run)
-			if err != nil {
-				return nil, fmt.Errorf("invalid template in step %s: %w", step.Name, err)
-			}
-			jp.templateCache[cacheKey] = tmpl
+		renderedRun, err := jp.renderTemplateString(compInst.Type, step.Name, "run", step.Run, context)
+		if err != nil {
+			return nil, err
 		}
-
-		// Execute the (cached) template
-		var buf strings.Builder
-		if err := tmpl.Execute(&buf, context); err != nil {
-			return nil, fmt.Errorf("failed to execute template in step %s: %w", step.Name, err)
+		renderedUse, err := jp.renderTemplateString(compInst.Type, step.Name, "use", step.Use, context)
+		if err != nil {
+			return nil, err
+		}
+		renderedShell, err := jp.renderTemplateString(compInst.Type, step.Name, "shell", step.Shell, context)
+		if err != nil {
+			return nil, err
+		}
+		renderedWorkingDirectory, err := jp.renderTemplateString(compInst.Type, step.Name, "working-directory", step.WorkingDirectory, context)
+		if err != nil {
+			return nil, err
+		}
+		renderedWith, err := jp.renderTemplateMap(compInst.Type, step.Name, "with", step.With, context)
+		if err != nil {
+			return nil, err
+		}
+		renderedEnv, err := jp.renderTemplateMap(compInst.Type, step.Name, "env", step.Env, context)
+		if err != nil {
+			return nil, err
 		}
 
 		rendered = append(rendered, model.RenderedStep{
-			Name:      step.Name,
-			Phase:     model.NormalizePhase(step.Phase),
-			Order:     step.Order,
-			Run:       buf.String(),
-			Timeout:   step.Timeout,
-			Retry:     step.Retry,
-			OnFailure: step.OnFailure,
+			ID:               step.ID,
+			Name:             step.Name,
+			Phase:            model.NormalizePhase(step.Phase),
+			Order:            step.Order,
+			Run:              renderedRun,
+			Use:              renderedUse,
+			With:             renderedWith,
+			Env:              renderedEnv,
+			Shell:            renderedShell,
+			WorkingDirectory: renderedWorkingDirectory,
+			Timeout:          step.Timeout,
+			Retry:            step.Retry,
+			OnFailure:        step.OnFailure,
 		})
+	}
+
+	return rendered, nil
+}
+
+func (jp *JobPlanner) renderTemplateString(componentType, stepName, fieldName, value string, context map[string]interface{}) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+
+	cacheKey := fmt.Sprintf("%s:%s:%s", componentType, stepName, fieldName)
+	tmpl, exists := jp.templateCache[cacheKey]
+	if !exists {
+		var err error
+		tmpl, err = template.New(cacheKey).Parse(value)
+		if err != nil {
+			return "", fmt.Errorf("invalid template in step %s %s: %w", stepName, fieldName, err)
+		}
+		jp.templateCache[cacheKey] = tmpl
+	}
+
+	var buf strings.Builder
+	if err := tmpl.Execute(&buf, context); err != nil {
+		return "", fmt.Errorf("failed to execute template in step %s %s: %w", stepName, fieldName, err)
+	}
+
+	return buf.String(), nil
+}
+
+func (jp *JobPlanner) renderTemplateMap(componentType, stepName, fieldName string, values map[string]interface{}, context map[string]interface{}) (map[string]interface{}, error) {
+	if len(values) == 0 {
+		return nil, nil
+	}
+
+	rendered := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		strValue, ok := value.(string)
+		if !ok {
+			rendered[key] = value
+			continue
+		}
+		resolved, err := jp.renderTemplateString(componentType, stepName, fieldName+":"+key, strValue, context)
+		if err != nil {
+			return nil, err
+		}
+		rendered[key] = resolved
 	}
 
 	return rendered, nil

@@ -22,6 +22,7 @@ var (
 	runJobID              string
 	runRetry              bool
 	runRunner             string
+	runGHACompat          bool
 )
 
 var runCmd = &cobra.Command{
@@ -44,10 +45,18 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (must match plan job id)")
 	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job-id before running")
 	runCmd.Flags().StringVar(&runRunner, "runner", "", "Execution backend: local, github-actions, docker")
+	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
 }
 
 func runPlan() error {
+	if runGHACompat && executor.NormalizeRunnerName(runRunner) != "" && executor.NormalizeRunnerName(runRunner) != "github-actions" {
+		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
+	}
+
 	runnerName := resolveRunnerName(runRunner)
+	if runGHACompat {
+		runnerName = "github-actions"
+	}
 	runtime := runtimeContextForRunner(runnerName)
 	selectedExecutor, err := executor.Get(runnerName)
 	if err != nil {

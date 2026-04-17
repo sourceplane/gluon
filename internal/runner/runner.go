@@ -87,7 +87,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		Context:            context.Background(),
 		WorkspaceDir:       workspaceDir,
 		UseWorkDirOverride: r.UseWorkDirOverride,
-		Env: executor.MergeEnvironment(
+		BaseEnv: executor.MergeEnvironment(
 			executor.EnvironmentFromList(os.Environ()),
 			map[string]string{
 				"LITECI_CONTEXT": r.Runtime.Environment,
@@ -99,6 +99,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		Stderr:  r.Stderr,
 		DryRun:  r.DryRun,
 	}
+	baseExecContext.Env = executor.MergeEnvironment(baseExecContext.BaseEnv)
 
 	statePath := r.resolveStateFile(plan)
 	state, err := r.loadState(statePath)
@@ -201,6 +202,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		r.printJobHeader(job)
 
 		jobFailed := false
+		jobWorkingDir := r.resolveWorkingDir(job.Path)
 		currentPhase := ""
 		for idx, step := range job.Steps {
 			stepID := stepIdentifier(step)
@@ -223,10 +225,15 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 			fmt.Fprintf(r.Stdout, "  │  • Step %d/%d  %s\n", idx+1, len(job.Steps), stepID)
 			fmt.Fprintf(r.Stdout, "  │    phase: %s    order: %d\n", stepPhase, step.Order)
-			workingDir := r.resolveWorkingDir(job.Path)
+			workingDir := jobWorkingDir
 			fmt.Fprintf(r.Stdout, "  │    cwd: %s\n", workingDir)
 			fmt.Fprintf(r.Stdout, "  │    runner: %s\n", r.Executor.Name())
-			fmt.Fprintf(r.Stdout, "  │    run: %s\n", step.Run)
+			if step.Run != "" {
+				fmt.Fprintf(r.Stdout, "  │    run: %s\n", step.Run)
+			}
+			if step.Use != "" {
+				fmt.Fprintf(r.Stdout, "  │    use: %s\n", step.Use)
+			}
 			retryCount := r.resolveRetryCount(job, step)
 			if retryCount > 0 {
 				fmt.Fprintf(r.Stdout, "  │    retries: %d\n", retryCount)
@@ -304,6 +311,33 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 				}
 			}
 			fmt.Fprintf(r.Stdout, "  │    %s completed\n", ui.Green(r.Color, "✓"))
+		}
+
+		if !r.DryRun {
+			if finalizer, ok := r.Executor.(executor.JobFinalizer); ok {
+				jobExecContext := baseExecContext
+				jobExecContext.WorkDir = jobWorkingDir
+				jobExecContext.JobEnv = executor.JobEnvironment(job.Env)
+				jobExecContext.StepEnv = nil
+				jobExecContext.Env = executor.MergeEnvironment(jobExecContext.BaseEnv, jobExecContext.JobEnv)
+				output, finalizeErr := finalizer.FinalizeJob(jobExecContext, job)
+				r.printStepOutput(output)
+				if finalizeErr != nil {
+					jobFailed = true
+					jobState.Status = "failed"
+					jobState.LastError = fmt.Sprintf("job finalizer: %v", finalizeErr)
+					jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
+					if persistState {
+						if err := r.saveState(statePath, state); err != nil {
+							return err
+						}
+					}
+					r.printFailureBlock(finalizeErr, output, jobWorkingDir)
+					if failFast {
+						return fmt.Errorf("job %s finalizer failed in %s: %w", job.ID, jobWorkingDir, finalizeErr)
+					}
+				}
+			}
 		}
 
 		if jobState.Status != "failed" {
@@ -529,6 +563,9 @@ func stepIdentifier(step model.PlanStep) string {
 	if strings.TrimSpace(step.Name) != "" {
 		return strings.TrimSpace(step.Name)
 	}
+	if strings.TrimSpace(step.Use) != "" {
+		return strings.TrimSpace(step.Use)
+	}
 	return "unnamed-step"
 }
 
@@ -611,9 +648,22 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 
 	execContext := base
 	execContext.Context = stepContext
-	execContext.WorkDir = workingDir
-	execContext.Env = executor.MergeEnvironment(base.Env, executor.JobEnvironment(job.Env))
+	execContext.JobEnv = executor.JobEnvironment(job.Env)
+	execContext.StepEnv = executor.JobEnvironment(step.Env)
+	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
+	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv)
 	return execContext, cancel, nil
+}
+
+func (r *Runner) resolveStepWorkingDir(baseWorkingDir, stepWorkingDir string) string {
+	resolved := strings.TrimSpace(stepWorkingDir)
+	if resolved == "" {
+		return baseWorkingDir
+	}
+	if filepath.IsAbs(resolved) {
+		return resolved
+	}
+	return filepath.Join(baseWorkingDir, resolved)
 }
 
 func (r *Runner) printStepOutput(output string) {

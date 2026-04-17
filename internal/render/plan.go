@@ -102,14 +102,19 @@ func (r *Renderer) convertSteps(steps []model.RenderedStep) []model.PlanStep {
 			stepID = fmt.Sprintf("step-%d", i+1)
 		}
 		planSteps[i] = model.PlanStep{
-			ID:        stepID,
-			Name:      step.Name,
-			Phase:     step.Phase,
-			Order:     step.Order,
-			Run:       step.Run,
-			Timeout:   step.Timeout,
-			Retry:     step.Retry,
-			OnFailure: step.OnFailure,
+			ID:               stepID,
+			Name:             step.Name,
+			Phase:            step.Phase,
+			Order:            step.Order,
+			Run:              step.Run,
+			Use:              step.Use,
+			With:             step.With,
+			Env:              step.Env,
+			Shell:            step.Shell,
+			WorkingDirectory: step.WorkingDirectory,
+			Timeout:          step.Timeout,
+			Retry:            step.Retry,
+			OnFailure:        step.OnFailure,
 		}
 	}
 	return planSteps

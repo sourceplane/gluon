@@ -271,6 +271,12 @@ func (pv *PlanViewer) ViewByComponent(componentName string) string {
 							runCmd = runCmd[:67] + "..."
 						}
 						sb.WriteString(fmt.Sprintf("%s    %s   run: %s\n", connector, "   ", runCmd))
+					} else if step.Use != "" {
+						useRef := step.Use
+						if len(useRef) > 70 {
+							useRef = useRef[:67] + "..."
+						}
+						sb.WriteString(fmt.Sprintf("%s    %s   use: %s\n", connector, "   ", useRef))
 					}
 				}
 			}

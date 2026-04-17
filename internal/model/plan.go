@@ -53,12 +53,17 @@ type PlanJob struct {
 
 // PlanStep is a step in the final plan
 type PlanStep struct {
-	ID        string `json:"id,omitempty" yaml:"id,omitempty"`
-	Name      string `json:"name,omitempty" yaml:"name,omitempty"`
-	Phase     string `json:"phase,omitempty" yaml:"phase,omitempty"`
-	Order     int    `json:"order,omitempty" yaml:"order,omitempty"`
-	Run       string `json:"run" yaml:"run"`
-	Timeout   string `json:"timeout,omitempty" yaml:"timeout,omitempty"`
-	Retry     int    `json:"retry,omitempty" yaml:"retry,omitempty"`
-	OnFailure string `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
+	ID               string                 `json:"id,omitempty" yaml:"id,omitempty"`
+	Name             string                 `json:"name,omitempty" yaml:"name,omitempty"`
+	Phase            string                 `json:"phase,omitempty" yaml:"phase,omitempty"`
+	Order            int                    `json:"order,omitempty" yaml:"order,omitempty"`
+	Run              string                 `json:"run,omitempty" yaml:"run,omitempty"`
+	Use              string                 `json:"use,omitempty" yaml:"use,omitempty"`
+	With             map[string]interface{} `json:"with,omitempty" yaml:"with,omitempty"`
+	Env              map[string]interface{} `json:"env,omitempty" yaml:"env,omitempty"`
+	Shell            string                 `json:"shell,omitempty" yaml:"shell,omitempty"`
+	WorkingDirectory string                 `json:"working-directory,omitempty" yaml:"working-directory,omitempty"`
+	Timeout          string                 `json:"timeout,omitempty" yaml:"timeout,omitempty"`
+	Retry            int                    `json:"retry,omitempty" yaml:"retry,omitempty"`
+	OnFailure        string                 `json:"onFailure,omitempty" yaml:"onFailure,omitempty"`
 }
