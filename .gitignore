@@ -61,3 +61,7 @@ Thumbs.db
 /examples/gha-actions/.liteci/
 /examples/gha-actions/.liteci-state.json
 /examples/gha-actions/plan.json
+/website/.docusaurus/
+/website/docs-build/
+/website/node_modules/
+/website/.wrangler/

@@ -1,0 +1,33 @@
+{
+  "name": "ciz-docs",
+  "version": "1.0.0",
+  "description": "Documentation site for ciz",
+  "scripts": {
+    "docs:start": "docusaurus start",
+    "docs:build": "docusaurus build --out-dir docs-build",
+    "docs:serve": "docusaurus serve --dir docs-build"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sourceplane/ciz.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/sourceplane/ciz/issues"
+  },
+  "homepage": "https://github.com/sourceplane/ciz#readme",
+  "private": true,
+  "overrides": {
+    "webpack": "5.105.4",
+    "html-webpack-plugin": "5.6.6"
+  },
+  "dependencies": {
+    "@docusaurus/core": "3.9.2",
+    "@docusaurus/preset-classic": "3.9.2",
+    "@mdx-js/react": "3.1.1",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  }
+}

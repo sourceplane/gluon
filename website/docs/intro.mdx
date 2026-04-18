@@ -1,0 +1,124 @@
+---
+title: ciz documentation
+slug: /
+---
+
+<div className="heroFrame">
+  <div className="eyebrow">CNCF-grade planning docs</div>
+  <h1 className="heroTitle">Compile policy-aware intent into execution DAGs you can review, diff, and run anywhere.</h1>
+  <p className="heroCopy">
+    <code>ciz</code> separates desired state, composition logic, and runtime execution. Platform teams define intent once,
+    validate it against schemas, bind it to reusable compositions, and materialize a deterministic plan that can run on a
+    local shell, inside Docker, or through a GitHub Actions-compatible backend.
+  </p>
+  <div className="heroActions">
+    <a className="button button--primary button--lg" href="/getting-started/quick-start">Start with the quick start</a>
+    <a className="button button--secondary button--lg" href="/architecture/compiler-pipeline">Read the compiler pipeline</a>
+  </div>
+</div>
+
+<div className="cardGrid">
+  <article className="featureCard">
+    <h3>Intent stays declarative</h3>
+    <p>Keep policy, environment defaults, and component subscriptions in intent files instead of leaking execution details into app repos.</p>
+  </article>
+  <article className="featureCard">
+    <h3>Compositions stay reusable</h3>
+    <p>Each composition pairs a schema with one or more job definitions, so platform teams can evolve execution contracts centrally.</p>
+  </article>
+  <article className="featureCard">
+    <h3>Plans stay deterministic</h3>
+    <p>The generated plan is an immutable DAG with explicit jobs, steps, dependencies, retries, and state-file metadata.</p>
+  </article>
+  <article className="featureCard">
+    <h3>Runtimes stay swappable</h3>
+    <p>Compile once, then preview or execute through the local shell, a Docker runner, or GitHub Actions compatibility mode.</p>
+  </article>
+</div>
+
+## What ciz is for
+
+Use `ciz` when you need a planner that can scale from a single repository to a platform estate without collapsing intent, validation, and execution into one format.
+
+- Define desired state in `intent.yaml` plus discovered `component.yaml` files.
+- Validate platform contracts through JSON schema.
+- Bind component types to reusable job registries under a compositions directory.
+- Render a reviewable `plan.json` before anything executes.
+- Run the plan in dry-run or execute mode with explicit backend selection.
+
+## Mental model
+
+```text
+intent.yaml + component.yaml + compositions/
+                  ↓
+        load, normalize, validate
+                  ↓
+      expand environment × component matrix
+                  ↓
+      bind jobs and resolve dependencies
+                  ↓
+          render immutable plan.json
+                  ↓
+       dry-run or execute with a runner
+```
+
+<div className="signalGrid">
+  <article className="signalCard">
+    <strong>Desired state</strong>
+    <h3>Intent and components</h3>
+    <p>Intent declares environments, group-level policy, discovery roots, inline components, and change-scoping inputs. Component manifests declare type, inputs, labels, overrides, and dependencies.</p>
+  </article>
+  <article className="signalCard">
+    <strong>Execution contract</strong>
+    <h3>Compositions and schemas</h3>
+    <p>Each composition directory contains a schema for validation and a job registry for runtime behavior. That keeps platform logic versioned and reusable.</p>
+  </article>
+  <article className="signalCard">
+    <strong>Compiled artifact</strong>
+    <h3>Plan DAG</h3>
+    <p>The plan records explicit jobs, step order, phase boundaries, dependencies, and runtime hints. It is the artifact you diff, archive, and execute.</p>
+  </article>
+</div>
+
+## Typical workflow
+
+```bash
+./ciz validate \
+  --intent examples/intent.yaml \
+  --config-dir assets/config/compositions
+
+./ciz plan \
+  --intent examples/intent.yaml \
+  --config-dir assets/config/compositions \
+  --output /tmp/ciz-plan.json
+
+./ciz run --plan /tmp/ciz-plan.json
+```
+
+The default `run` mode is a dry-run, so teams can inspect the resolved jobs and steps before enabling `--execute`.
+
+## How to read these docs
+
+<div className="pathGrid">
+  <article className="pathCard">
+    <strong>Start here</strong>
+    <h3>Getting started</h3>
+    <p>Install the CLI, compile the example intent, and inspect the generated plan before executing anything.</p>
+  </article>
+  <article className="pathCard">
+    <strong>Then learn</strong>
+    <h3>Concepts and architecture</h3>
+    <p>Understand the separation between intent, compositions, plans, and runners before authoring your own platform contracts.</p>
+  </article>
+  <article className="pathCard">
+    <strong>Then operate</strong>
+    <h3>CLI and reference</h3>
+    <p>Use the command reference, schema reference, and environment variable matrix when integrating `ciz` into CI or platform automation.</p>
+  </article>
+</div>
+
+## Next steps
+
+1. Follow the [installation](./getting-started/installation.md) guide.
+2. Run the repository-backed [quick start](./getting-started/quick-start.md).
+3. Read [intent model](./concepts/intent-model.md) and [plan DAG](./concepts/plan-dag.md) before writing new compositions.

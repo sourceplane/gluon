@@ -23,6 +23,26 @@ Intent.yaml + Job Compositions + Schemas
 - **⚡ Deterministic** - Same inputs → Same outputs, every time
 - **📊 Debuggable** - Detailed phase-by-phase IR dumps
 
+## Documentation
+
+- Start with the docs landing page: [website/docs/intro.mdx](website/docs/intro.mdx)
+- Run the local docs site: `cd website && npm install && npm run docs:start`
+- Build the static docs site: `cd website && npm run docs:build`
+
+## Manual Cloudflare Pages deploy
+
+The docs site builds into `website/docs-build/`. To publish it manually to Cloudflare Pages:
+
+```bash
+cd website
+npm ci
+npm run docs:build
+wrangler login
+wrangler pages deploy docs-build --project-name ciz-docs
+```
+
+Replace `ciz-docs` with your Cloudflare Pages project name if it is different.
+
 ## Installation
 
 ### Option 1: Direct Binary Download
