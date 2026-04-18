@@ -27,6 +27,9 @@ type ExecContext struct {
 	WorkspaceDir       string
 	WorkDir            string
 	UseWorkDirOverride bool
+	BaseEnv            map[string]string
+	JobEnv             map[string]string
+	StepEnv            map[string]string
 	Env                map[string]string
 	Runtime            RuntimeContext
 	Stdout             io.Writer
@@ -40,6 +43,11 @@ type Executor interface {
 	Prepare(ctx ExecContext) error
 	RunStep(ctx ExecContext, job model.PlanJob, step model.PlanStep) (output string, err error)
 	Cleanup(ctx ExecContext) error
+}
+
+// JobFinalizer is implemented by executors that need job-level cleanup or post-step handling.
+type JobFinalizer interface {
+	FinalizeJob(ctx ExecContext, job model.PlanJob) (output string, err error)
 }
 
 func NormalizeRunnerName(name string) string {

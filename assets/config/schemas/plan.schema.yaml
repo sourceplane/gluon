@@ -93,7 +93,6 @@ properties:
             type: object
             required:
               - id
-              - run
             properties:
               id:
                 type: string
@@ -110,6 +109,18 @@ properties:
                 minimum: 0
               run:
                 type: string
+              use:
+                type: string
+              with:
+                type: object
+                additionalProperties: true
+              env:
+                type: object
+                additionalProperties: true
+              shell:
+                type: string
+              working-directory:
+                type: string
               timeout:
                 type: string
               retry:
@@ -119,6 +130,11 @@ properties:
                 enum:
                   - stop
                   - continue
+            anyOf:
+              - required:
+                  - run
+              - required:
+                  - use
         dependsOn:
           type: array
           items:

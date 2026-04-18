@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/sourceplane/liteci/internal/gha"
 )
 
 type factory func() Executor
@@ -13,7 +15,7 @@ var factories = map[string]factory{
 		return &dockerExecutor{pulledImages: map[string]struct{}{}}
 	},
 	"github-actions": func() Executor {
-		return &githubActionsExecutor{delegate: &localExecutor{}}
+		return &githubActionsExecutor{engine: gha.NewEngine(gha.Options{})}
 	},
 	"local": func() Executor {
 		return &localExecutor{}

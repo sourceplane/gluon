@@ -1,9 +1,12 @@
 package executor
 
-import "github.com/sourceplane/liteci/internal/model"
+import (
+	"github.com/sourceplane/liteci/internal/gha"
+	"github.com/sourceplane/liteci/internal/model"
+)
 
 type githubActionsExecutor struct {
-	delegate *localExecutor
+	engine *gha.Engine
 }
 
 func (e *githubActionsExecutor) Name() string {
@@ -11,20 +14,29 @@ func (e *githubActionsExecutor) Name() string {
 }
 
 func (e *githubActionsExecutor) Prepare(ctx ExecContext) error {
-	return e.delegate.Prepare(ctx)
+	return e.engine.Prepare(toGHAContext(ctx))
 }
 
 func (e *githubActionsExecutor) RunStep(execCtx ExecContext, job model.PlanJob, step model.PlanStep) (string, error) {
-	delegated := execCtx
-	delegated.Env = MergeEnvironment(execCtx.Env, map[string]string{
-		"CI":             "true",
-		"GITHUB_ACTIONS": "true",
-		"LITECI_CONTEXT": "ci",
-		"LITECI_RUNNER":  e.Name(),
-	})
-	return e.delegate.RunStep(delegated, job, step)
+	return e.engine.RunStep(toGHAContext(execCtx), job, step)
+}
+
+func (e *githubActionsExecutor) FinalizeJob(ctx ExecContext, job model.PlanJob) (string, error) {
+	return e.engine.FinalizeJob(toGHAContext(ctx), job)
 }
 
 func (e *githubActionsExecutor) Cleanup(ctx ExecContext) error {
-	return e.delegate.Cleanup(ctx)
+	return e.engine.Cleanup(toGHAContext(ctx))
+}
+
+func toGHAContext(ctx ExecContext) gha.ExecContext {
+	return gha.ExecContext{
+		Context:      ctx.Context,
+		WorkspaceDir: ctx.WorkspaceDir,
+		WorkDir:      ctx.WorkDir,
+		BaseEnv:      ctx.BaseEnv,
+		JobEnv:       ctx.JobEnv,
+		StepEnv:      ctx.StepEnv,
+		Env:          ctx.Env,
+	}
 }

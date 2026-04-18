@@ -22,6 +22,7 @@ var (
 	runJobID              string
 	runRetry              bool
 	runRunner             string
+	runGHACompat          bool
 )
 
 var runCmd = &cobra.Command{
@@ -44,10 +45,25 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().StringVar(&runJobID, "job-id", "", "Run only a specific job ID (must match plan job id)")
 	runCmd.Flags().BoolVar(&runRetry, "retry", false, "Clear existing state for selected --job-id before running")
 	runCmd.Flags().StringVar(&runRunner, "runner", "", "Execution backend: local, github-actions, docker")
+	runCmd.Flags().BoolVar(&runGHACompat, "gha", false, "Enable GitHub Actions compatibility mode")
 }
 
 func runPlan() error {
+	if runGHACompat && executor.NormalizeRunnerName(runRunner) != "" && executor.NormalizeRunnerName(runRunner) != "github-actions" {
+		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
+	}
+
+	plan, err := loadPlan(runPlanFile)
+	if err != nil {
+		return err
+	}
+
 	runnerName := resolveRunnerName(runRunner)
+	if runGHACompat {
+		runnerName = "github-actions"
+	} else if shouldAutoUseGitHubActions(runRunner, plan) {
+		runnerName = "github-actions"
+	}
 	runtime := runtimeContextForRunner(runnerName)
 	selectedExecutor, err := executor.Get(runnerName)
 	if err != nil {
@@ -57,11 +73,6 @@ func runPlan() error {
 		if workspace := strings.TrimSpace(os.Getenv("GITHUB_WORKSPACE")); workspace != "" {
 			runWorkDir = workspace
 		}
-	}
-
-	plan, err := loadPlan(runPlanFile)
-	if err != nil {
-		return err
 	}
 
 	dryRun := !runExecute
@@ -98,6 +109,36 @@ func resolveRunnerName(flagValue string) string {
 		return "github-actions"
 	}
 	return "local"
+}
+
+func shouldAutoUseGitHubActions(flagValue string, plan *model.Plan) bool {
+	if !planUsesGitHubActions(plan) {
+		return false
+	}
+	if executor.NormalizeRunnerName(flagValue) != "" {
+		return false
+	}
+	if executor.NormalizeRunnerName(os.Getenv("LITECI_RUNNER")) != "" {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("GITHUB_ACTIONS")), "true") {
+		return false
+	}
+	return true
+}
+
+func planUsesGitHubActions(plan *model.Plan) bool {
+	if plan == nil {
+		return false
+	}
+	for _, job := range plan.Jobs {
+		for _, step := range job.Steps {
+			if strings.TrimSpace(step.Use) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func runtimeContextForRunner(runnerName string) executor.RuntimeContext {

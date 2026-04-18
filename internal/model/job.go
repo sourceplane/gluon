@@ -33,13 +33,19 @@ type JobSpec struct {
 
 // Step is a single execution unit within a job
 type Step struct {
-	Name      string `yaml:"name" json:"name"`
-	Phase     string `yaml:"phase,omitempty" json:"phase,omitempty"`
-	Order     int    `yaml:"order,omitempty" json:"order,omitempty"`
-	Run       string `yaml:"run" json:"run"`
-	Timeout   string `yaml:"timeout,omitempty" json:"timeout,omitempty"`
-	Retry     int    `yaml:"retry,omitempty" json:"retry,omitempty"`
-	OnFailure string `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
+	ID               string                 `yaml:"id,omitempty" json:"id,omitempty"`
+	Name             string                 `yaml:"name" json:"name"`
+	Phase            string                 `yaml:"phase,omitempty" json:"phase,omitempty"`
+	Order            int                    `yaml:"order,omitempty" json:"order,omitempty"`
+	Run              string                 `yaml:"run,omitempty" json:"run,omitempty"`
+	Use              string                 `yaml:"use,omitempty" json:"use,omitempty"`
+	With             map[string]interface{} `yaml:"with,omitempty" json:"with,omitempty"`
+	Env              map[string]interface{} `yaml:"env,omitempty" json:"env,omitempty"`
+	Shell            string                 `yaml:"shell,omitempty" json:"shell,omitempty"`
+	WorkingDirectory string                 `yaml:"working-directory,omitempty" json:"working-directory,omitempty"`
+	Timeout          string                 `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Retry            int                    `yaml:"retry,omitempty" json:"retry,omitempty"`
+	OnFailure        string                 `yaml:"onFailure,omitempty" json:"onFailure,omitempty"` // stop, continue
 }
 
 // NormalizePhase returns a normalized phase string and defaults empty values to "main".
@@ -108,13 +114,19 @@ type JobInstance struct {
 
 // RenderedStep is a step with all templates resolved
 type RenderedStep struct {
-	Name      string `json:"name"`
-	Phase     string `json:"phase,omitempty"`
-	Order     int    `json:"order,omitempty"`
-	Run       string `json:"run"`
-	Timeout   string `json:"timeout"`
-	Retry     int    `json:"retry"`
-	OnFailure string `json:"onFailure"`
+	ID               string                 `json:"id,omitempty"`
+	Name             string                 `json:"name"`
+	Phase            string                 `json:"phase,omitempty"`
+	Order            int                    `json:"order,omitempty"`
+	Run              string                 `json:"run,omitempty"`
+	Use              string                 `json:"use,omitempty"`
+	With             map[string]interface{} `json:"with,omitempty"`
+	Env              map[string]interface{} `json:"env,omitempty"`
+	Shell            string                 `json:"shell,omitempty"`
+	WorkingDirectory string                 `json:"workingDirectory,omitempty"`
+	Timeout          string                 `json:"timeout"`
+	Retry            int                    `json:"retry"`
+	OnFailure        string                 `json:"onFailure"`
 }
 
 // JobGraph represents the logical DAG of all job instances

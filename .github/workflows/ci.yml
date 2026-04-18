@@ -26,6 +26,9 @@ jobs:
           cd scripts/releaser
           go test ./...
 
+      - name: Run GitHub Actions compatibility tests
+        run: go test ./internal/gha -run 'Test(ParseKVFileSupportsHeredocAndBOM|ProcessWorkflowCommandsParsesLegacyCommands|EngineRunStepLocalCompositeActionPropagatesOutputsAndEnv)$'
+
       - name: Validate provider package build
         uses: sourceplane/tinx-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
         with:
