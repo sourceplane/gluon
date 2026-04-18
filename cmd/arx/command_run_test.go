@@ -66,3 +66,9 @@ func TestShouldAutoUseGitHubActionsHonorsExplicitRunnerSettings(t *testing.T) {
 		t.Fatal("expected primary runner env var to disable auto-detect")
 	}
 }
+
+func TestRunCommandRegistersVerboseFlag(t *testing.T) {
+	if runCmd.Flags().Lookup("verbose") == nil {
+		t.Fatal("expected run command to register --verbose")
+	}
+}

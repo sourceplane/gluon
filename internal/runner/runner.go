@@ -31,6 +31,7 @@ type Runner struct {
 	DryRun             bool
 	JobID              string
 	Retry              bool
+	Verbose            bool
 	Color              bool
 	Executor           executor.Executor
 	Runtime            executor.RuntimeContext
@@ -56,7 +57,7 @@ type runSummary struct {
 	waiting   int
 }
 
-func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool, exec executor.Executor, runtime executor.RuntimeContext) *Runner {
+func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer, dryRun bool, jobID string, retry bool, verbose bool, exec executor.Executor, runtime executor.RuntimeContext) *Runner {
 	return &Runner{
 		WorkDir:            workDir,
 		UseWorkDirOverride: useWorkDirOverride,
@@ -65,6 +66,7 @@ func NewRunner(workDir string, useWorkDirOverride bool, stdout, stderr io.Writer
 		DryRun:             dryRun,
 		JobID:              jobID,
 		Retry:              retry,
+		Verbose:            verbose,
 		Color:              ui.ColorEnabledForWriter(stdout),
 		Executor:           exec,
 		Runtime:            runtime,
@@ -129,21 +131,16 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		return err
 	}
 
-	var targetJob *model.PlanJob
 	if r.JobID != "" {
-		job, err := findJobByID(orderedJobs, r.JobID)
-		if err != nil {
+		if _, err := findJobByID(orderedJobs, r.JobID); err != nil {
 			return err
 		}
-		targetJob = &job
 	}
 
-	r.printRunHeader(plan, statePath)
-	if targetJob != nil {
-		r.printTargetJobSummary(*targetJob, state)
+	if r.shouldPrintPreflight(orderedJobs) {
+		r.printRunHeader(plan, statePath)
+		r.printReadinessSnapshot(orderedJobs, state)
 	}
-
-	r.printReadinessSnapshot(orderedJobs, state)
 
 	if !r.DryRun {
 		if err := r.Executor.Prepare(baseExecContext); err != nil {
@@ -187,7 +184,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		jobState := ensureJobState(state, job)
 		if jobState.Status == "completed" {
 			summary.skipped++
-			fmt.Fprintf(r.Stdout, "%s Skip job %s (already completed)\n", ui.Yellow(r.Color, "↷"), job.ID)
+			fmt.Fprintf(r.Stdout, "%s %s already completed\n", ui.Yellow(r.Color, "↷"), job.ID)
 			continue
 		}
 
@@ -212,11 +209,13 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			stepID := stepIdentifier(step)
 			stepPhase := normalizeStepPhase(step.Phase)
 			if stepPhase != currentPhase {
-				r.printPhaseHeader(stepPhase)
+				if stepPhase != "main" {
+					r.printPhaseHeader(stepPhase)
+				}
 				currentPhase = stepPhase
 			}
 			if jobState.Steps[stepID] == "completed" {
-				fmt.Fprintf(r.Stdout, "  │  ↷ Step %d/%d %s (already completed)\n", idx+1, len(job.Steps), stepID)
+				r.printStepSkipped(stepID, idx+1, len(job.Steps))
 				continue
 			}
 
@@ -227,24 +226,12 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 				}
 			}
 
-			fmt.Fprintf(r.Stdout, "  │  • Step %d/%d  %s\n", idx+1, len(job.Steps), stepID)
-			fmt.Fprintf(r.Stdout, "  │    phase: %s    order: %d\n", stepPhase, step.Order)
-			workingDir := jobWorkingDir
-			fmt.Fprintf(r.Stdout, "  │    cwd: %s\n", workingDir)
-			fmt.Fprintf(r.Stdout, "  │    runner: %s\n", r.Executor.Name())
-			if step.Run != "" {
-				fmt.Fprintf(r.Stdout, "  │    run: %s\n", step.Run)
-			}
-			if step.Use != "" {
-				fmt.Fprintf(r.Stdout, "  │    use: %s\n", step.Use)
-			}
+			workingDir := r.resolveStepWorkingDir(jobWorkingDir, step.WorkingDirectory)
 			retryCount := r.resolveRetryCount(job, step)
-			if retryCount > 0 {
-				fmt.Fprintf(r.Stdout, "  │    retries: %d\n", retryCount)
-			}
-			if timeoutValue := r.resolveTimeout(job, step); timeoutValue != "" {
-				fmt.Fprintf(r.Stdout, "  │    timeout: %s\n", timeoutValue)
-			}
+			timeoutValue := r.resolveTimeout(job, step)
+			stepStartedAt := time.Now()
+			r.printStepStart(stepID, idx+1, len(job.Steps))
+			r.printStepContext(step, workingDir, timeoutValue, retryCount)
 			if r.DryRun {
 				jobState.Steps[stepID] = "completed"
 				if persistState {
@@ -252,15 +239,15 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 						return err
 					}
 				}
-				fmt.Fprintf(r.Stdout, "  │    ✓ completed (dry-run)\n")
+				r.printStepDryRun()
 				continue
 			}
 
 			var output string
 			attempts := retryCount + 1
 			for attempt := 1; attempt <= attempts; attempt++ {
-				if attempts > 1 {
-					fmt.Fprintf(r.Stdout, "  │    attempt: %d/%d\n", attempt, attempts)
+				if attempts > 1 && attempt > 1 {
+					r.printStepRetry(attempt, attempts)
 				}
 
 				execContext, cancel, execErr := r.stepExecContext(baseExecContext, job, step, workingDir)
@@ -272,16 +259,16 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 
 				output, err = r.Executor.RunStep(execContext, job, step)
 				cancel()
-				r.printStepOutput(output)
 
 				if err == nil {
 					break
 				}
 
 				if attempt < attempts {
-					fmt.Fprintf(r.Stdout, "  │    %s step failed, retrying\n", ui.Yellow(r.Color, "↻"))
+					fmt.Fprintf(r.Stdout, "  │ %s retrying after failure\n", ui.Yellow(r.Color, "↻"))
 				}
 			}
+			stepDuration := time.Since(stepStartedAt)
 
 			if err != nil {
 				jobState.Steps[stepID] = "failed"
@@ -294,9 +281,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 					}
 				}
 
-				r.printFailureBlock(err, output, workingDir)
+				r.printStepFailure(step, output, stepDuration, err, workingDir)
 				if strings.EqualFold(step.OnFailure, "continue") {
-					fmt.Fprintf(r.Stdout, "  │    %s onFailure=continue, moving to next step\n", ui.Yellow(r.Color, "⚠"))
+					r.printStepContinuation()
 					continue
 				}
 
@@ -314,7 +301,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 					return err
 				}
 			}
-			fmt.Fprintf(r.Stdout, "  │    %s completed\n", ui.Green(r.Color, "✓"))
+			r.printStepSuccess(step, output, stepDuration)
 		}
 
 		if !r.DryRun {
@@ -325,7 +312,14 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 				jobExecContext.StepEnv = nil
 				jobExecContext.Env = executor.MergeEnvironment(jobExecContext.BaseEnv, jobExecContext.JobEnv)
 				output, finalizeErr := finalizer.FinalizeJob(jobExecContext, job)
-				r.printStepOutput(output)
+				if strings.TrimSpace(output) != "" {
+					if r.Verbose || finalizeErr != nil {
+						r.printBlock("post-job logs", splitDisplayLines(output))
+					} else {
+						fmt.Fprintln(r.Stdout, "  │")
+						fmt.Fprintf(r.Stdout, "  │ post-job logs: %s\n", ui.Dim(r.Color, "(collapsed; use --verbose to expand)"))
+					}
+				}
 				if finalizeErr != nil {
 					jobFailed = true
 					jobState.Status = "failed"
@@ -354,9 +348,10 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 				}
 			}
 			summary.completed++
-			fmt.Fprintf(r.Stdout, "  └─ %s Job %s completed\n", ui.Green(r.Color, "✓"), job.ID)
+			r.printJobFooter(true)
 		} else if !jobFailed {
 			summary.failed++
+			r.printJobFooter(false)
 		}
 
 		if r.JobID != "" {
@@ -370,37 +365,28 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 	}
 
-	r.printRunSummary(summary)
+	if r.shouldPrintRunSummary(summary) {
+		r.printRunSummary(summary)
+	}
 
 	return nil
 }
 
 func (r *Runner) printRunHeader(plan *model.Plan, statePath string) {
-	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "┌──────────────────────────────────────────────────────────┐"))
-	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, "│ arx run                                                  │"))
-	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "├──────────────────────────────────────────────────────────┤"))
-	fmt.Fprintf(r.Stdout, "│ plan:  %s (%s)\n", plan.Metadata.Name, plan.Metadata.Checksum)
-	if r.JobID != "" {
-		fmt.Fprintf(r.Stdout, "│ jobs:  1 targeted (%d total in plan)\n", len(plan.Jobs))
-	} else {
-		fmt.Fprintf(r.Stdout, "│ jobs:  %d\n", len(plan.Jobs))
-	}
-	fmt.Fprintf(r.Stdout, "│ state: %s\n", statePath)
 	mode := "execute"
 	if r.DryRun {
 		mode = "dry-run"
 	}
-	fmt.Fprintf(r.Stdout, "│ mode:  %s\n", mode)
-	fmt.Fprintf(r.Stdout, "│ runner: %s\n", r.Executor.Name())
-	if r.UseWorkDirOverride {
-		fmt.Fprintf(r.Stdout, "│ cwd:   override (%s)\n", r.WorkDir)
-	} else {
-		fmt.Fprintln(r.Stdout, "│ cwd:   component-path (job.path)")
+	planLabel := strings.TrimSpace(plan.Metadata.Name)
+	if planLabel == "" {
+		planLabel = "plan"
 	}
+	fmt.Fprintf(r.Stdout, "%s  %s   runner=%s   mode=%s\n", ui.BoldCyan(r.Color, "arx run"), planLabel, r.Executor.Name(), mode)
+	fmt.Fprintf(r.Stdout, "%s state=%s\n", ui.Dim(r.Color, "↳"), statePath)
 	if r.JobID != "" {
-		fmt.Fprintf(r.Stdout, "│ target: %s\n", r.JobID)
+		fmt.Fprintf(r.Stdout, "%s target=%s\n", ui.Dim(r.Color, "↳"), r.JobID)
 	}
-	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "└──────────────────────────────────────────────────────────┘"))
+	fmt.Fprintln(r.Stdout)
 }
 
 func (r *Runner) printTargetJobSummary(job model.PlanJob, state *State) {
@@ -455,19 +441,7 @@ func (r *Runner) printWaiting(job model.PlanJob, unmet []string, state *State) {
 }
 
 func (r *Runner) printRunSummary(summary *runSummary) {
-	title := "run summary"
-	if r.JobID != "" {
-		title = "target job summary"
-	}
-
-	fmt.Fprintln(r.Stdout, "\n"+ui.Cyan(r.Color, "┌──────────────────────────────────────────────────────────┐"))
-	fmt.Fprintln(r.Stdout, ui.BoldCyan(r.Color, fmt.Sprintf("│ %-56s │", title)))
-	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "├──────────────────────────────────────────────────────────┤"))
-	fmt.Fprintf(r.Stdout, "│ completed: %d\n", summary.completed)
-	fmt.Fprintf(r.Stdout, "│ skipped:   %d\n", summary.skipped)
-	fmt.Fprintf(r.Stdout, "│ waiting:   %d\n", summary.waiting)
-	fmt.Fprintf(r.Stdout, "│ failed:    %s\n", ui.Red(r.Color, fmt.Sprintf("%d", summary.failed)))
-	fmt.Fprintln(r.Stdout, ui.Cyan(r.Color, "└──────────────────────────────────────────────────────────┘"))
+	fmt.Fprintf(r.Stdout, "\n%s completed=%d  skipped=%d  waiting=%d  failed=%s\n", ui.BoldCyan(r.Color, "run summary"), summary.completed, summary.skipped, summary.waiting, ui.Red(r.Color, fmt.Sprintf("%d", summary.failed)))
 }
 
 func normalizeStepPhase(phase string) string {
@@ -676,19 +650,8 @@ func (r *Runner) resolveStepWorkingDir(baseWorkingDir, stepWorkingDir string) st
 	return filepath.Join(baseWorkingDir, resolved)
 }
 
-func (r *Runner) printStepOutput(output string) {
-	if strings.TrimSpace(output) == "" {
-		return
-	}
-
-	fmt.Fprintln(r.Stdout, "  │    output:")
-	for _, line := range strings.Split(output, "\n") {
-		fmt.Fprintf(r.Stdout, "  │      %s\n", line)
-	}
-}
-
 func (r *Runner) printPhaseHeader(phase string) {
-	title := "Main commands"
+	title := "Phase"
 	switch phase {
 	case "pre":
 		title = "Pre-steps"
@@ -696,14 +659,12 @@ func (r *Runner) printPhaseHeader(phase string) {
 		title = "Post-steps"
 	}
 
-	fmt.Fprintf(r.Stdout, "\n  ├─ %s\n", ui.Cyan(r.Color, title))
+	fmt.Fprintf(r.Stdout, "\n  %s %s\n", ui.Cyan(r.Color, "◦"), ui.Cyan(r.Color, title))
 }
 
 func (r *Runner) printJobHeader(job model.PlanJob) {
 	fmt.Fprintf(r.Stdout, "\n%s Job %s\n", ui.Cyan(r.Color, "╭─"), ui.Bold(r.Color, job.ID))
-	fmt.Fprintf(r.Stdout, "│  component: %s\n", job.Component)
-	fmt.Fprintf(r.Stdout, "│  environment: %s\n", job.Environment)
-	fmt.Fprintf(r.Stdout, "│  status: %s\n", ui.Green(r.Color, "ready"))
+	fmt.Fprintf(r.Stdout, "│ component: %s   env: %s\n", job.Component, job.Environment)
 }
 
 func (r *Runner) printFailureBlock(err error, output, workingDir string) {

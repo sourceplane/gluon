@@ -32,6 +32,12 @@ Force GitHub Actions compatibility mode:
 arx run --plan plan.json --execute --gha
 ```
 
+Show full step logs instead of the compact summary view:
+
+```bash
+arx run --plan plan.json --execute --verbose
+```
+
 Retry one failed job after clearing its saved state:
 
 ```bash
@@ -50,6 +56,7 @@ arx run --plan plan.json --execute --workdir ./examples
 | --- | --- |
 | `--plan`, `-p` | Path to the compiled plan file |
 | `--execute`, `-x` | Actually execute commands instead of dry-running |
+| `--verbose` | Expand full step logs instead of the compact summary view |
 | `--workdir` | Override the working directory for all jobs |
 | `--job-id` | Run only one job ID |
 | `--retry` | Clear saved state for the selected `--job-id` before running |
@@ -70,3 +77,5 @@ arx run --plan plan.json --execute --workdir ./examples
 ## State files
 
 Executed plans record progress in the configured state file, usually `.arx-state.json`. That allows resumable execution and job-level retries while protecting against plan checksum mismatches.
+
+By default, successful runs render a compact per-step view with summaries and results while collapsing noisy backend logs. Use `--verbose` when you need the raw step logs inline.

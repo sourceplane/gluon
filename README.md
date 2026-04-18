@@ -598,6 +598,7 @@ arx run \
 - `--debug` - Enable verbose logging
 - `-p, --plan` - Path to compiled plan file for `run`
 - `-x, --execute` - Execute commands (without this, `run` is dry-run)
+- `--verbose` - Expand full step logs for `run` instead of the compact summary view
 - `--gha` - Shortcut for GitHub Actions compatibility mode (`--runner github-actions`)
 - `--runner` - Execution backend for `run`: `local`, `github-actions`, or `docker`
 
@@ -615,6 +616,8 @@ Runner notes:
 - `local` uses the host shell and installed binaries.
 - `github-actions` enables GitHub Actions-compatible `use:` steps, expression evaluation, file commands such as `GITHUB_ENV` and `GITHUB_OUTPUT`, and post-step handling for supported actions.
 - `docker` runs each step in a fresh container, mounts the workspace at `/workspace`, and uses `job.runsOn` as the image. Common GitHub-style labels such as `ubuntu-22.04` map to `ubuntu:22.04`. If `runsOn` is empty, `ubuntu:22.04` is used.
+
+`run` now defaults to a compact execution view that summarizes successful steps and collapses noisy backend logs. Add `--verbose` when you want the full raw logs inline.
 
 ## Troubleshooting
 

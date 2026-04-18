@@ -26,3 +26,5 @@ go run ../../cmd/arx run \
 ```
 
 `arx run` auto-selects GitHub Actions compatibility mode because the compiled plan contains a `use:` step. The run succeeds when `azure/setup-helm` provisions Helm and the following shell step can execute `helm version --short`.
+
+Successful runs use the compact `run` output by default. Add `--verbose` if you want the full GitHub Actions-compatible step logs inline.

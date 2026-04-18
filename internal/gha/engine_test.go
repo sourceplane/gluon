@@ -35,11 +35,14 @@ func TestProcessWorkflowCommandsParsesLegacyCommands(t *testing.T) {
 	t.Parallel()
 
 	raw := strings.Join([]string{
+		"::group::Installing v4.1.4",
+		"::debug::cache hit",
 		"::add-mask::secret",
 		"::set-output name=result::done",
 		"::save-state name=token::secret",
 		"::add-path::/tmp/bin",
 		"::set-env name=GREETING::hello",
+		"visible output",
 		"secret",
 	}, "\n")
 
@@ -55,6 +58,12 @@ func TestProcessWorkflowCommandsParsesLegacyCommands(t *testing.T) {
 	}
 	if len(result.Paths) != 1 || result.Paths[0] != "/tmp/bin" {
 		t.Fatalf("result.Paths = %#v, want [/tmp/bin]", result.Paths)
+	}
+	if strings.Contains(result.Output, "::group::") || strings.Contains(result.Output, "::debug::") || strings.Contains(result.Output, "::set-output") {
+		t.Fatalf("result.Output = %q, want workflow command lines removed", result.Output)
+	}
+	if !strings.Contains(result.Output, "visible output") {
+		t.Fatalf("result.Output = %q, want visible payload preserved", result.Output)
 	}
 	if !strings.Contains(result.Output, "***") {
 		t.Fatalf("result.Output = %q, want masked content", result.Output)

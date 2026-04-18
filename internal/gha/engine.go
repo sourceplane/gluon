@@ -936,6 +936,7 @@ func processWorkflowCommands(output string, existingMasks []string) workflowComm
 	for _, line := range lines {
 		name, properties, arg, ok := parseWorkflowCommand(line)
 		if ok {
+			rendered := ""
 			switch strings.ToLower(name) {
 			case "add-mask":
 				if arg != "" {
@@ -958,7 +959,21 @@ func processWorkflowCommands(output string, existingMasks []string) workflowComm
 				if envName := properties["name"]; envName != "" {
 					result.Env[envName] = arg
 				}
+			case "notice", "warning", "error":
+				if arg != "" {
+					rendered = fmt.Sprintf("%s: %s", strings.ToLower(name), arg)
+				}
+			case "group", "endgroup", "debug", "echo":
+				// Suppress workflow-command noise from compact console output.
+			default:
+				if arg != "" {
+					rendered = arg
+				}
 			}
+			if rendered != "" {
+				sanitized = append(sanitized, applyMasks(rendered, masks))
+			}
+			continue
 		}
 		sanitized = append(sanitized, applyMasks(line, masks))
 	}
