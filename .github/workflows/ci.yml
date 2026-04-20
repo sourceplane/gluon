@@ -30,7 +30,7 @@ jobs:
         run: go test ./internal/gha -run 'Test(ParseKVFileSupportsHeredocAndBOM|ProcessWorkflowCommandsParsesLegacyCommands|EngineRunStepLocalCompositeActionPropagatesOutputsAndEnv)$'
 
       - name: Validate provider package build
-        uses: sourceplane/tinx-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
+        uses: sourceplane/kiox-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
         with:
           manifest: provider.yaml
           main: ./cmd/gluon
@@ -38,13 +38,13 @@ jobs:
           dist: dist
           tag: ci
 
-      - name: Smoke test provider with tinx-action
-        uses: sourceplane/tinx-action@813d00a458c74b54cb12ee80eca34deeb89dcc0b
+      - name: Smoke test provider with kiox-action
+        uses: sourceplane/kiox-action@813d00a458c74b54cb12ee80eca34deeb89dcc0b
         with:
           providers: |
             ${{ github.workspace }}/oci as gluon
           run: |
-            tinx --workspace "$TINX_WORKSPACE_ROOT" provider list
+            kiox --workspace "$KIOX_WORKSPACE_ROOT" provider list
             gluon validate --intent "$GITHUB_WORKSPACE/examples/intent.yaml"
             gluon compositions --config-dir "$GITHUB_WORKSPACE/assets/config/compositions"
             gluon plan \

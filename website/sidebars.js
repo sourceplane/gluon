@@ -46,7 +46,7 @@ const sidebars = {
         'examples/review-pull-request',
         'examples/run-github-actions',
         'examples/run-with-docker',
-        'examples/use-with-tinx',
+        'examples/use-with-kiox',
       ],
     },
     {

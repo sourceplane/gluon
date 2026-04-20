@@ -25,15 +25,15 @@ func publishOCI(opts Options, manifest config.ProviderManifest) error {
 
 	artifactType := manifest.Distribution.ArtifactType
 	if artifactType == "" {
-		artifactType = "application/vnd.tinx.provider.v1"
+		artifactType = "application/vnd.kiox.provider.v1"
 	}
 	manifestMediaType := manifest.Layers.Core.MediaType
 	if manifestMediaType == "" {
-		manifestMediaType = "application/vnd.tinx.provider.manifest.v1+yaml"
+		manifestMediaType = "application/vnd.kiox.provider.manifest.v1+yaml"
 	}
 	assetsMediaType := manifest.Layers.Core.AssetsMediaType
 	if assetsMediaType == "" {
-		assetsMediaType = "application/vnd.tinx.provider.assets.v1+tar"
+		assetsMediaType = "application/vnd.kiox.provider.assets.v1+tar"
 	}
 
 	mediaByPlatform := map[string]string{}
@@ -55,7 +55,7 @@ func publishOCI(opts Options, manifest config.ProviderManifest) error {
 		platformKey := platform.OS + "/" + platform.Arch
 		mediaType := mediaByPlatform[platformKey]
 		if mediaType == "" {
-			mediaType = fmt.Sprintf("application/vnd.tinx.provider.binary.%s.%s.v1", platform.OS, platform.Arch)
+			mediaType = fmt.Sprintf("application/vnd.kiox.provider.binary.%s.%s.v1", platform.OS, platform.Arch)
 		}
 		args = append(args, fmt.Sprintf("%s:%s", filepath.ToSlash(filepath.Join(opts.OutputDir, filepath.FromSlash(platform.Binary))), mediaType))
 	}
@@ -103,7 +103,7 @@ func examplesConfig(manifest config.ProviderManifest) (string, string, bool) {
 
 	examplesMediaType := manifest.Layers.Examples.MediaType
 	if examplesMediaType == "" {
-		examplesMediaType = "application/vnd.tinx.provider.assets.v1+tar"
+		examplesMediaType = "application/vnd.kiox.provider.assets.v1+tar"
 	}
 	return examplesDir, examplesMediaType, true
 }

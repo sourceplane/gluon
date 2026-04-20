@@ -12,7 +12,7 @@ func TestLoadProviderManifestNormalizesCurrentProviderShape(t *testing.T) {
 	manifestPath := filepath.Join(dir, "provider.yaml")
 
 	content := []byte(strings.Join([]string{
-		"apiVersion: tinx.io/v1",
+		"apiVersion: kiox.io/v1",
 		"kind: Provider",
 		"metadata:",
 		"  namespace: sourceplane",

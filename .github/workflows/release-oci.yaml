@@ -13,7 +13,7 @@ env:
   IMAGE_REF: ghcr.io/sourceplane/gluon:${{ github.ref_name }}
 
 jobs:
-  tinx-release:
+  kiox-release:
     runs-on: ubuntu-latest
 
     steps:
@@ -43,7 +43,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - uses: sourceplane/tinx-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
+      - uses: sourceplane/kiox-release-action@81af02d17b1fe5ec12eb54133903d305b1599312
         with:
           manifest: provider.yaml
           main: ./cmd/gluon

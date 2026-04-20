@@ -1,6 +1,6 @@
 # releaser
 
-`releaser` is a standalone-ready Go CLI that packages and optionally publishes tinx provider layouts from an existing `dist/` directory.
+`releaser` is a standalone-ready Go CLI that packages and optionally publishes kiox provider layouts from an existing `dist/` directory.
 
 ## Structure
 
@@ -40,7 +40,7 @@ This validates packaging without publishing.
 
 ## Pipeline
 
-The GitHub Actions release workflow uses `sourceplane/tinx-release-action` directly. The standalone `releaser` remains useful when you already have a populated `dist/` directory and want to package or publish it manually:
+The GitHub Actions release workflow uses `sourceplane/kiox-release-action` directly. The standalone `releaser` remains useful when you already have a populated `dist/` directory and want to package or publish it manually:
 
 ```bash
 cd scripts/releaser

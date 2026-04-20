@@ -99,12 +99,12 @@ podman run ghcr.io/sourceplane/gluon:<tag> plan -i intent.yaml
 kubectl run gluon --image=ghcr.io/sourceplane/gluon:<tag>
 ```
 
-### Option 4: Using tinx
+### Option 4: Using kiox
 
 ```bash
 repo_root="$(pwd)"
-tinx init demo -p ghcr.io/sourceplane/gluon:<tag> as gluon
-tinx --workspace demo -- gluon plan \
+kiox init demo -p ghcr.io/sourceplane/gluon:<tag> as gluon
+kiox --workspace demo -- gluon plan \
   --intent "$repo_root/examples/intent.yaml" \
   --config-dir "$repo_root/assets/config/compositions"
 ```

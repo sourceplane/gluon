@@ -1,4 +1,4 @@
-apiVersion: tinx.io/v1
+apiVersion: kiox.io/v1
 kind: Provider
 metadata:
   namespace: sourceplane

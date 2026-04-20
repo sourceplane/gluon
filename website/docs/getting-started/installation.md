@@ -2,7 +2,7 @@
 title: Installation
 ---
 
-Install `gluon` from source when you want the local CLI, or run it as a packaged provider through `tinx` when you want workspace-pinned execution.
+Install `gluon` from source when you want the local CLI, or run it as a packaged provider through `kiox` when you want workspace-pinned execution.
 
 ## Prerequisites
 
@@ -50,13 +50,13 @@ sudo mv entrypoint /usr/local/bin/gluon
 chmod +x /usr/local/bin/gluon
 ```
 
-## Run gluon through tinx
+## Run gluon through kiox
 
 This path is useful when you want the planner pinned as an OCI-distributed provider inside a reproducible workspace.
 
 ```bash
-tinx init demo -p ghcr.io/sourceplane/gluon:<tag> as gluon
-tinx --workspace demo -- gluon --help
+kiox init demo -p ghcr.io/sourceplane/gluon:<tag> as gluon
+kiox --workspace demo -- gluon --help
 ```
 
 ## Build the docs site locally
