@@ -106,7 +106,7 @@ func describeRun(ref string) error {
 	if meta != nil {
 		fmt.Fprintf(os.Stdout, "Plan:        %s\n", meta.PlanName)
 		fmt.Fprintf(os.Stdout, "Plan ID:     %s\n", meta.PlanID)
-		fmt.Fprintf(os.Stdout, "Status:      %s %s\n", statusSymbol(meta.Status, color), meta.Status)
+		fmt.Fprintf(os.Stdout, "Status:      %s %s\n", styleStatus(meta.Status, color), meta.Status)
 		fmt.Fprintf(os.Stdout, "Started:     %s\n", meta.StartedAt)
 		if meta.FinishedAt != "" {
 			fmt.Fprintf(os.Stdout, "Finished:    %s\n", meta.FinishedAt)
@@ -123,7 +123,7 @@ func describeRun(ref string) error {
 			if js == nil {
 				continue
 			}
-			icon := statusSymbol(js.Status, color)
+			icon := styleStatus(js.Status, color)
 			duration := ""
 			if js.StartedAt != "" && js.FinishedAt != "" {
 				duration = formatDuration(js.StartedAt, js.FinishedAt)
@@ -134,7 +134,7 @@ func describeRun(ref string) error {
 			}
 
 			for stepID, stepStatus := range js.Steps {
-				stepIcon := statusSymbol(stepStatus, color)
+				stepIcon := styleStatus(stepStatus, color)
 				fmt.Fprintf(os.Stdout, "      %s %s\n", stepIcon, stepID)
 			}
 		}
@@ -260,7 +260,7 @@ func describeJob(jobRef string) error {
 		if st != nil {
 			if js, ok := st.Jobs[job.Job.ID]; ok && js != nil {
 				fmt.Fprintf(os.Stdout, "\n%s (from execution %s)\n", ui.Bold(color, "State"), execID)
-				fmt.Fprintf(os.Stdout, "  Status:   %s %s\n", statusSymbol(js.Status, color), js.Status)
+				fmt.Fprintf(os.Stdout, "  Status:   %s %s\n", styleStatus(js.Status, color), js.Status)
 				if js.StartedAt != "" {
 					fmt.Fprintf(os.Stdout, "  Started:  %s\n", js.StartedAt)
 				}

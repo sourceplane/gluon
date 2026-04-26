@@ -412,32 +412,22 @@ func listCompositions(args []string) error {
 }
 
 func listComponents(args []string) error {
-	fmt.Println(stylePanel("┌──────────────────────────────────────────────────────────┐"))
-	fmt.Println(styleTitle("│ components                                               │"))
-	fmt.Println(stylePanel("├──────────────────────────────────────────────────────────┤"))
-	fmt.Printf("│ intent: %s\n", intentFile)
-	fmt.Println(stylePanel("└──────────────────────────────────────────────────────────┘"))
-
-	fmt.Println("□ Loading intent...")
 	intent, _, err := loadResolvedIntentFile(intentFile)
 	if err != nil {
 		return fmt.Errorf("failed to load intent: %w", err)
 	}
 
-	fmt.Println("□ Normalizing intent...")
 	normalized, err := normalize.NormalizeIntent(intent)
 	if err != nil {
 		return fmt.Errorf("failed to normalize intent: %w", err)
 	}
 
-	// Analyze components first to get expanded/resolved paths
 	analyzer := expand.NewComponentAnalyzer(normalized)
 	components, err := analyzer.ListAll()
 	if err != nil {
 		return fmt.Errorf("failed to analyze components: %w", err)
 	}
 
-	// Initialize change detector if --changed flag is set
 	var changedComps map[string]bool
 	if changedOnly {
 		changedComps = make(map[string]bool)
@@ -452,49 +442,36 @@ func listComponents(args []string) error {
 			return fmt.Errorf("failed to detect changed files: %w", err)
 		}
 
-		// Check intent file for changes
 		intentChanged := isIntentPathChanged(changedSet, intentFile)
 
-		// For each component, check if any resolved paths have changed
 		for _, comp := range components {
 			normalizedComp, exists := normalized.ComponentIndex[comp.Name]
 			if !exists {
 				continue
 			}
 			if intentChanged {
-				// If intent changed, all components are affected
 				changedComps[comp.Name] = true
 			} else if isFileChanged(changedSet, normalizedComp.SourcePath) {
 				changedComps[comp.Name] = true
 			} else {
-				// Check each instance's resolved path
-				found := false
 				for _, inst := range comp.Instances {
 					if inst.Path != "" && inst.Path != "./" {
 						if isPathChanged(changedSet, inst.Path) {
 							changedComps[comp.Name] = true
-							found = true
 							break
 						}
 					}
-				}
-				if found {
-					continue
 				}
 			}
 		}
 
 		if len(changedComps) == 0 {
-			fmt.Println("\n" + stylePanel("┌──────────────────────────────────────────────────────────┐"))
-			fmt.Println(styleTitle("│ changed components                                       │"))
-			fmt.Println(stylePanel("├──────────────────────────────────────────────────────────┤"))
-			fmt.Println("│ none                                                     │")
-			fmt.Println(stylePanel("└──────────────────────────────────────────────────────────┘"))
+			color := ui.ColorEnabledForWriter(os.Stdout)
+			fmt.Println(ui.Dim(color, "No changed components."))
 			return nil
 		}
 	}
 
-	// Filter by specific component if requested
 	if len(args) > 0 {
 		componentName := args[0]
 		comp, err := analyzer.GetComponentByName(componentName)
@@ -515,18 +492,18 @@ func listComponents(args []string) error {
 		return nil
 	}
 
-	// List all components (or just changed ones)
 	if len(components) == 0 {
-		fmt.Println("No components found")
+		color := ui.ColorEnabledForWriter(os.Stdout)
+		fmt.Println(ui.Dim(color, "No components found."))
 		return nil
 	}
 
-	// If --changed, use dependency resolver to show categorized components
+	color := ui.ColorEnabledForWriter(os.Stdout)
+
 	if changedOnly && len(changedComps) > 0 {
 		resolver := expand.NewDependencyResolver(normalized)
 		changed, dependencies, dependents := resolver.CategorizeDependencies(changedComps)
 
-		// Create a combined map for filtering
 		includedComps := make(map[string]bool)
 		for comp := range changed {
 			includedComps[comp] = true
@@ -538,77 +515,69 @@ func listComponents(args []string) error {
 			includedComps[comp] = true
 		}
 
-		fmt.Println("\n" + styleTitle("Components:"))
-		fmt.Println("\n" + styleTitle("Dependency impact"))
-
-		// Print changed components
 		if len(changed) > 0 {
-			fmt.Println("\n  ├─ changed")
+			fmt.Printf("\n%s\n", ui.Bold(color, "Changed"))
 			for _, comp := range components {
 				if changed[comp.Name] {
 					if longFormat {
 						printComponentDetails(comp)
 					} else {
-						fmt.Printf("  │  ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
-							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+						printComponentCompact(comp, color)
 					}
 				}
 			}
 		}
 
-		// Print dependencies
 		if len(dependencies) > 0 {
-			fmt.Println("\n  ├─ dependencies")
+			fmt.Printf("\n%s\n", ui.Bold(color, "Dependencies"))
 			for _, comp := range components {
 				if dependencies[comp.Name] {
 					if longFormat {
 						printComponentDetails(comp)
 					} else {
-						fmt.Printf("  │  ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
-							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+						printComponentCompact(comp, color)
 					}
 				}
 			}
 		}
 
-		// Print dependents
 		if len(dependents) > 0 {
-			fmt.Println("\n  └─ dependents")
+			fmt.Printf("\n%s\n", ui.Bold(color, "Dependents"))
 			for _, comp := range components {
 				if dependents[comp.Name] {
 					if longFormat {
 						printComponentDetails(comp)
 					} else {
-						fmt.Printf("     ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
-							comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+						printComponentCompact(comp, color)
 					}
 				}
 			}
 		}
 
-		if !longFormat {
-			fmt.Println("\n" + styleTip("Tip: run 'gluon component <name>' for detailed information"))
-		}
 		return nil
 	}
 
-	fmt.Println("\n" + styleTitle("Component list"))
-	for _, comp := range components {
-		// Skip if --changed flag and component hasn't changed
-		if changedOnly && !changedComps[comp.Name] {
-			continue
-		}
-
-		if longFormat {
-			printComponentDetails(comp)
-		} else {
-			fmt.Printf("  ├─ %s (type=%s, domain=%s, enabled=%v, envs=%d)\n",
-				comp.Name, comp.Type, comp.Domain, comp.Enabled, len(comp.Instances))
+	// Default listing
+	visible := components
+	if changedOnly {
+		visible = nil
+		for _, comp := range components {
+			if changedComps[comp.Name] {
+				visible = append(visible, comp)
+			}
 		}
 	}
 
-	if !longFormat {
-		fmt.Println("\n" + styleTip("Tip: run 'gluon component <name>' for detailed information"))
+	fmt.Printf("%s components\n\n", ui.Bold(color, fmt.Sprintf("%d", len(visible))))
+
+	if longFormat {
+		for _, comp := range visible {
+			printComponentDetails(comp)
+		}
+	} else {
+		for _, comp := range visible {
+			printComponentCompact(comp, color)
+		}
 	}
 
 	return nil
@@ -638,6 +607,23 @@ func printComponentDetails(comp *expand.ComponentMerged) {
 		}
 	}
 	fmt.Printf("╰─ end component %s\n", comp.Name)
+}
+
+func printComponentCompact(comp *expand.ComponentMerged, color bool) {
+	envNames := make([]string, 0, len(comp.Instances))
+	for _, inst := range comp.Instances {
+		envNames = append(envNames, inst.Environment)
+	}
+	sort.Strings(envNames)
+	envStr := strings.Join(envNames, ",")
+
+	enabledMark := ui.Green(color, "✓")
+	if !comp.Enabled {
+		enabledMark = ui.Dim(color, "–")
+	}
+
+	fmt.Fprintf(os.Stdout, "  %s %-24s %-28s %s\n",
+		enabledMark, comp.Name, ui.Dim(color, comp.Type), ui.Dim(color, envStr))
 }
 
 func main() {

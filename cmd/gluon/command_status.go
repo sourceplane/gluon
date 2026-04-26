@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -49,7 +50,9 @@ func showStatus() error {
 		var err error
 		execID, err = store.ResolveExecID("latest")
 		if err != nil {
-			fmt.Println("No executions found.")
+			fmt.Println(ui.Dim(color, "No executions yet."))
+			fmt.Println()
+			fmt.Printf("  Run a plan with:  %s\n", ui.Bold(color, "gluon run"))
 			return nil
 		}
 	} else {
@@ -69,21 +72,38 @@ func showAllExecutions(store *state.Store, color bool) error {
 		return err
 	}
 	if len(execs) == 0 {
-		fmt.Println("No executions found.")
+		fmt.Println(ui.Dim(color, "No executions yet."))
+		fmt.Println()
+		fmt.Printf("  Run a plan with:  %s\n", ui.Bold(color, "gluon run"))
 		return nil
 	}
 
-	fmt.Fprintf(os.Stdout, "%-40s %-12s %-20s %-8s %-12s %s\n",
-		"EXECUTION", "STATUS", "PLAN", "JOBS", "DURATION", "AGE")
+	// Sort running executions first
+	sort.SliceStable(execs, func(i, j int) bool {
+		iRunning := strings.ToLower(execs[i].Status) == "running"
+		jRunning := strings.ToLower(execs[j].Status) == "running"
+		if iRunning != jRunning {
+			return iRunning
+		}
+		return false
+	})
+
+	fmt.Fprintf(os.Stdout, "%s  %s  %s  %s  %s  %s\n",
+		padRight(ui.Bold(color, "EXECUTION"), 38),
+		padRight(ui.Bold(color, "STATUS"), 12),
+		padRight(ui.Bold(color, "PLAN"), 20),
+		padRight(ui.Bold(color, "JOBS"), 8),
+		padRight(ui.Bold(color, "DURATION"), 12),
+		ui.Bold(color, "AGE"))
 
 	for _, exec := range execs {
-		statusIcon := statusSymbol(exec.Status, color)
+		icon := styleStatus(exec.Status, color)
 		jobs := fmt.Sprintf("%d/%d", exec.JobDone, exec.JobTotal)
 		duration := formatDuration(exec.StartedAt, exec.FinishedAt)
 		age := formatAge(exec.StartedAt)
 
-		fmt.Fprintf(os.Stdout, "%s %-38s %-12s %-20s %-8s %-12s %s\n",
-			statusIcon, exec.ID, exec.Status, exec.PlanName, jobs, duration, age)
+		fmt.Fprintf(os.Stdout, "%s %-37s %-12s %-20s %-8s %-12s %s\n",
+			icon, exec.ID, exec.Status, exec.PlanName, jobs, duration, age)
 	}
 
 	return nil
@@ -93,43 +113,98 @@ func showExecution(store *state.Store, execID string, color bool) error {
 	meta, _ := store.LoadMetadata(execID)
 	st, _ := store.LoadState(execID)
 
-	fmt.Fprintf(os.Stdout, "Execution  %s\n", ui.Bold(color, execID))
-
+	// Compact execution header
+	headerParts := []string{
+		fmt.Sprintf("EXECUTION %s", ui.Bold(color, execID)),
+	}
 	if meta != nil {
-		if meta.PlanName != "" {
-			fmt.Fprintf(os.Stdout, "Plan       %s", meta.PlanName)
-			if meta.PlanID != "" {
-				fmt.Fprintf(os.Stdout, "  %s", ui.Dim(color, "sha256:"+meta.PlanID))
-			}
-			fmt.Fprintln(os.Stdout)
-		}
-		fmt.Fprintf(os.Stdout, "Status     %s %s\n", statusSymbol(meta.Status, color), meta.Status)
-		fmt.Fprintf(os.Stdout, "Started    %s\n", meta.StartedAt)
+		headerParts = append(headerParts,
+			fmt.Sprintf("%s %s", styleStatus(meta.Status, color), styleStatusText(meta.Status, color)),
+			fmt.Sprintf("%d/%d jobs", meta.JobDone, meta.JobTotal),
+		)
 		if meta.FinishedAt != "" {
-			fmt.Fprintf(os.Stdout, "Duration   %s\n", formatDuration(meta.StartedAt, meta.FinishedAt))
+			headerParts = append(headerParts, formatDuration(meta.StartedAt, meta.FinishedAt))
+		} else if meta.StartedAt != "" {
+			headerParts = append(headerParts, formatAge(meta.StartedAt))
 		}
-		fmt.Fprintf(os.Stdout, "Jobs       %d/%d  ✓ %d  ✗ %d\n", meta.JobDone, meta.JobTotal, meta.JobDone, meta.JobFailed)
+	}
+	fmt.Println(strings.Join(headerParts, "  "))
+
+	if meta != nil && meta.PlanName != "" {
+		planLine := fmt.Sprintf("Plan: %s", meta.PlanName)
+		if meta.PlanID != "" {
+			planLine += fmt.Sprintf("  %s", ui.Dim(color, "sha256:"+meta.PlanID))
+		}
+		fmt.Println(ui.Dim(color, planLine))
 	}
 
-	if st != nil && (statusDetailed || meta == nil) {
-		fmt.Fprintln(os.Stdout)
+	if meta != nil && meta.JobFailed > 0 {
+		fmt.Printf("%s  ✓ %d  ✗ %d\n",
+			ui.Dim(color, "Jobs:"),
+			meta.JobDone-meta.JobFailed,
+			meta.JobFailed)
+	}
+
+	if st != nil {
+		fmt.Println()
+
+		type jobDisplay struct {
+			id     string
+			status string
+			err    string
+			dur    string
+			steps  map[string]string
+		}
+
+		var jobs []jobDisplay
 		for jobID, js := range st.Jobs {
 			if js == nil {
 				continue
 			}
-			icon := statusSymbol(js.Status, color)
 			duration := ""
 			if js.StartedAt != "" && js.FinishedAt != "" {
 				duration = formatDuration(js.StartedAt, js.FinishedAt)
 			}
-			fmt.Fprintf(os.Stdout, "  %s %-50s %s\n", icon, jobID, duration)
-			if js.LastError != "" {
-				fmt.Fprintf(os.Stdout, "    %s %s\n", ui.Dim(color, "↳"), ui.Red(color, js.LastError))
+			jobs = append(jobs, jobDisplay{
+				id:     jobID,
+				status: js.Status,
+				err:    js.LastError,
+				dur:    duration,
+				steps:  js.Steps,
+			})
+		}
+
+		// Sort: running first, then failed, then completed, then pending
+		statusOrder := map[string]int{"running": 0, "failed": 1, "completed": 2, "pending": 3}
+		sort.Slice(jobs, func(i, j int) bool {
+			oi, ok := statusOrder[strings.ToLower(jobs[i].status)]
+			if !ok {
+				oi = 4
+			}
+			oj, ok := statusOrder[strings.ToLower(jobs[j].status)]
+			if !ok {
+				oj = 4
+			}
+			if oi != oj {
+				return oi < oj
+			}
+			return jobs[i].id < jobs[j].id
+		})
+
+		for _, job := range jobs {
+			icon := styleStatus(job.status, color)
+			durPart := ""
+			if job.dur != "" {
+				durPart = "  " + ui.Dim(color, job.dur)
+			}
+			fmt.Fprintf(os.Stdout, "  %s %-50s%s\n", icon, job.id, durPart)
+			if job.err != "" {
+				fmt.Fprintf(os.Stdout, "    %s %s\n", ui.Dim(color, "↳"), ui.Red(color, job.err))
 			}
 
 			if statusDetailed {
-				for stepID, stepStatus := range js.Steps {
-					stepIcon := statusSymbol(stepStatus, color)
+				for stepID, stepStatus := range job.steps {
+					stepIcon := styleStatus(stepStatus, color)
 					fmt.Fprintf(os.Stdout, "      %s %s\n", stepIcon, stepID)
 				}
 			}
@@ -137,21 +212,6 @@ func showExecution(store *state.Store, execID string, color bool) error {
 	}
 
 	return nil
-}
-
-func statusSymbol(status string, color bool) string {
-	switch strings.ToLower(status) {
-	case "completed":
-		return ui.Green(color, "✓")
-	case "failed":
-		return ui.Red(color, "✗")
-	case "running":
-		return ui.Blue(color, "●")
-	case "pending":
-		return ui.Dim(color, "○")
-	default:
-		return ui.Dim(color, "?")
-	}
 }
 
 func formatDuration(start, end string) string {
