@@ -2,7 +2,7 @@
 title: Quick start
 ---
 
-This walkthrough uses the repository's example intent, discovered components, and packaged composition sources to compile a plan and preview execution.
+This walkthrough uses the repository's example intent, discovered components, and packaged composition sources to compile a plan and execute it.
 
 ## 1. Build the CLI
 
@@ -31,8 +31,7 @@ This writes `examples/.gluon/compositions.lock.yaml` so future plans can reuse t
 ## 4. Validate the example intent and discovery tree
 
 ```bash
-./gluon validate \
-  --intent examples/intent.yaml
+./gluon validate --intent examples/intent.yaml
 ```
 
 This loads `examples/intent.yaml`, scans the discovery roots declared there, and validates each component against its matching composition schema.
@@ -40,9 +39,7 @@ This loads `examples/intent.yaml`, scans the discovery roots declared there, and
 ## 5. Inspect the merged component model
 
 ```bash
-./gluon component web-app \
-  --intent examples/intent.yaml \
-  --long
+./gluon component web-app --intent examples/intent.yaml --long
 ```
 
 Use this view when you want to verify labels, overrides, subscriptions, inputs, and dependency edges before you render the final plan.
@@ -50,42 +47,48 @@ Use this view when you want to verify labels, overrides, subscriptions, inputs, 
 ## 6. Compile a deterministic plan
 
 ```bash
-./gluon plan \
-  --intent examples/intent.yaml \
-  --output /tmp/gluon-plan.json \
-  --view dag
+./gluon plan --intent examples/intent.yaml --view dag
 ```
 
-The generated file is the execution boundary: a fully expanded DAG with explicit jobs, steps, and dependencies.
+The plan is saved to `.gluon/plans/` and linked as `latest`. It is the execution boundary: a fully expanded DAG with explicit jobs, steps, and dependencies.
 
 ## 7. Preview execution
 
 ```bash
-./gluon run --plan /tmp/gluon-plan.json
+./gluon run --dry-run
 ```
 
-`run` defaults to dry-run mode, which prints the execution order, working directories, runner choice, and resolved steps without mutating state.
+`--dry-run` prints the execution order, working directories, runner choice, and resolved steps without mutating state. `run` resolves the latest plan automatically.
 
 ## 8. Execute the plan
 
 ```bash
-./gluon run \
-  --plan /tmp/gluon-plan.json \
-  --execute \
-  --runner local
+./gluon run --runner local
 ```
 
 Swap `local` for `docker` when you want containerized execution, or use `--gha` when your plan includes GitHub Actions `use:` steps.
+
+## 9. Inspect the result
+
+```bash
+./gluon status
+./gluon get jobs
+./gluon logs
+```
+
+`status` shows a compact execution summary. `get jobs` shows the grouped job tree with status icons. `logs` streams the raw step output.
 
 ## What happened
 
 1. `compositions lock` resolved the declared composition sources and wrote a reproducible lock file beside the intent.
 2. `validate` loaded the intent, discovered component manifests, and enforced schema constraints.
 3. `component` showed the merged component view that feeds the compiler.
-4. `plan` expanded environment and component subscriptions into concrete jobs and dependency edges.
-5. `run` previewed or executed the immutable plan artifact.
+4. `plan` expanded environment and component subscriptions into concrete jobs and dependency edges, then stored the result in `.gluon/plans/`.
+5. `run --dry-run` previewed the immutable plan artifact.
+6. `run` executed it; progress was recorded in `.gluon/executions/`.
 
 ## Next steps
 
-1. Read [execution model](../concepts/execution-model.md) to understand dry-run, retries, phases, and state files.
+1. Read [execution model](../concepts/execution-model.md) to understand dry-run, concurrency, retries, phases, and execution records.
 2. Explore [GitHub Actions](../examples/run-github-actions.md) and [Docker](../examples/run-with-docker.md) runtime examples.
+3. Use `gluon get`, `gluon status`, and `gluon logs` to inspect and debug ongoing or past runs.

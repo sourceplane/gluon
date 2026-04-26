@@ -4,15 +4,19 @@ title: Execution model
 
 `gluon` keeps planning and execution separate on purpose. `plan` produces an immutable DAG, and `run` consumes that DAG through an explicit execution backend.
 
-## Dry-run is the default
+## Execute is the default
 
-`gluon run` does not execute steps unless you opt into `--execute`.
+`gluon run` executes steps immediately. Add `--dry-run` to preview without running.
 
 ```bash
-gluon run --plan plan.json
+# Execute (default)
+gluon run
+
+# Preview only
+gluon run --dry-run
 ```
 
-That default matters in review-heavy environments because it lets you inspect:
+Dry-run mode is useful in review-heavy environments because it lets you inspect:
 
 - job ordering
 - resolved working directories
@@ -40,6 +44,16 @@ If a step contains `use:`, the local executor fails fast and asks you to rerun w
 5. Auto-detection when the compiled plan contains a `use:` step
 6. Fallback to `local`
 
+## Concurrent job execution
+
+Jobs that have no dependency relationship execute concurrently. The degree of parallelism is controlled by `plan.execution.concurrency` in the compiled plan, and can be overridden at runtime:
+
+```bash
+gluon run --concurrency 4
+```
+
+Setting `--concurrency 1` forces strictly sequential execution, which is useful for debugging.
+
 ## Step phases and ordering
 
 Steps can declare `phase` and `order` attributes.
@@ -55,22 +69,41 @@ Execution stays deterministic:
 
 Within a phase, `gluon` sorts by `order` and then preserves declaration order.
 
-## State files and resumability
+## Execution records and state
 
-Executed plans track progress in a state file. The default is `.gluon-state.json`.
+Each `gluon run` creates an isolated execution record under `.gluon/executions/{exec-id}/`:
 
-That state lets `run`:
+```
+.gluon/
+  executions/
+    latest          → symlink to most recent exec
+    my-plan-20240601-a1b2c3/
+      metadata.json     # timing, user, trigger, job counts
+      state.json        # per-job and per-step completion status
+      logs/
+        job-id/
+          step-id.log   # raw step output
+```
 
-- skip already completed jobs
-- retry a single failed job with `--job-id` and `--retry`
-- verify the compiled plan checksum before resuming
+That structure enables:
+
+- **Resumable execution** — already-completed jobs are skipped
+- **Job-level retry** — `--job <id> --retry` clears only that job's state
+- **Immutable logs** — `gluon logs` reads from the execution record
+- **Parallel-safe CI** — each run gets its own `exec-id`, avoiding shared state collisions
+
+Use `GLUON_EXEC_ID` or `--exec-id` to pin an ID from CI for traceability.
+
+### Migration from legacy state
+
+If you have a pre-v0.10 `.gluon-state.json` file, `gluon run` automatically migrates it into the new structure on first execution.
 
 ## Working directory rules
 
 By default, each job runs in its own resolved job path. Use `--workdir` to override that behavior globally:
 
 ```bash
-gluon run --plan plan.json --execute --workdir ./examples
+gluon run --workdir ./examples
 ```
 
 When the GitHub Actions backend is selected and `--workdir` is not explicitly set, `gluon` uses `GITHUB_WORKSPACE` when that variable is available.

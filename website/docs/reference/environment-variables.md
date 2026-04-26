@@ -10,8 +10,13 @@ title: Environment variables
 | --- | --- |
 | `GLUON_CONFIG_DIR` | Default value for the global `--config-dir` legacy fallback |
 | `GLUON_RUNNER` | Default runner for `gluon run` |
+| `GLUON_EXEC_ID` | Execution ID injected into `gluon run`; useful in CI for stable cross-job traceability |
+| `GLUON_PLAN_ID` | Plan reference injected into `gluon run`; overrides the default `latest` resolution |
+| `GLUON_NO_COLOR` | Disable ANSI color output (any non-empty value) |
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
+
+`NO_COLOR` (the standard) and `CLICOLOR=0` are also honored for disabling color output.
 
 ## Variables injected during execution
 
