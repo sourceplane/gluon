@@ -165,6 +165,9 @@ func showExecution(store *state.Store, execID string, color bool) error {
 
 	type jobDisplay struct {
 		id     string
+		comp   string
+		env    string
+		short  string
 		status string
 		err    string
 		dur    string
@@ -181,8 +184,12 @@ func showExecution(store *state.Store, execID string, color bool) error {
 			if js.StartedAt != "" && js.FinishedAt != "" {
 				duration = formatDuration(js.StartedAt, js.FinishedAt)
 			}
+			comp, env, short := splitJobID(jobID)
 			jobs = append(jobs, jobDisplay{
 				id:     jobID,
+				comp:   comp,
+				env:    env,
+				short:  short,
 				status: js.Status,
 				err:    js.LastError,
 				dur:    duration,
@@ -196,6 +203,12 @@ func showExecution(store *state.Store, execID string, color bool) error {
 	}
 
 	sort.Slice(jobs, func(i, j int) bool {
+		if jobs[i].comp != jobs[j].comp {
+			return jobs[i].comp < jobs[j].comp
+		}
+		if jobs[i].env != jobs[j].env {
+			return jobs[i].env < jobs[j].env
+		}
 		oi := statusSortKey(jobs[i].status)
 		oj := statusSortKey(jobs[j].status)
 		if oi != oj {
@@ -204,15 +217,45 @@ func showExecution(store *state.Store, execID string, color bool) error {
 		return jobs[i].id < jobs[j].id
 	})
 
-	fmt.Println()
+	multiEnv := false
+	{
+		seen := ""
+		for _, j := range jobs {
+			if j.env == "" {
+				continue
+			}
+			if seen == "" {
+				seen = j.env
+				continue
+			}
+			if j.env != seen {
+				multiEnv = true
+				break
+			}
+		}
+	}
+	currentGroup := ""
 	for _, job := range jobs {
+		group := job.comp
+		if multiEnv && job.env != "" {
+			group = job.comp + "  " + ui.Dim(color, "·  "+job.env)
+		}
+		if group != "" && group != currentGroup {
+			fmt.Println()
+			fmt.Println("  " + ui.Bold(color, group))
+			currentGroup = group
+		}
 		icon := styleStatus(job.status, color)
-		line := fmt.Sprintf("%s %-24s", icon, job.id)
+		label := job.short
+		if label == "" {
+			label = job.id
+		}
+		line := fmt.Sprintf("    %s %s", icon, ui.Bold(color, label))
 		if job.dur != "" {
-			line += " " + padRight(ui.Dim(color, job.dur), 6)
+			line += "  " + ui.Dim(color, job.dur)
 		}
 		if job.err != "" {
-			line += "   " + ui.Red(color, job.err)
+			line += "  " + ui.Red(color, job.err)
 		}
 		fmt.Println(line)
 		if statusDetailed {
@@ -222,12 +265,33 @@ func showExecution(store *state.Store, execID string, color bool) error {
 			}
 			sort.Strings(stepIDs)
 			for _, stepID := range stepIDs {
-				fmt.Printf("  %s %s\n", styleStatus(job.steps[stepID], color), stepID)
+				fmt.Printf("       %s %s\n", styleStatus(job.steps[stepID], color), stepID)
 			}
 		}
 	}
 
 	return nil
+}
+
+// splitJobID parses a "component@env.name" job ID into its parts. Pieces that
+// can't be inferred are returned empty.
+func splitJobID(id string) (component, env, name string) {
+	rest := id
+	if at := strings.Index(rest, "@"); at >= 0 {
+		component = rest[:at]
+		rest = rest[at+1:]
+	}
+	if dot := strings.Index(rest, "."); dot >= 0 {
+		env = rest[:dot]
+		name = rest[dot+1:]
+		return
+	}
+	if component != "" {
+		env = rest
+		return
+	}
+	name = rest
+	return
 }
 
 func executionCountsFromState(meta *state.ExecMetadata, st *state.ExecState) executionCounts {
