@@ -86,6 +86,14 @@ func showLogs() error {
 	}
 
 	sort.Slice(entries, func(i, j int) bool {
+		ci, ei, _ := splitJobID(entries[i].jobID)
+		cj, ej, _ := splitJobID(entries[j].jobID)
+		if ci != cj {
+			return ci < cj
+		}
+		if ei != ej {
+			return ei < ej
+		}
 		oi := statusSortKey(entries[i].status)
 		oj := statusSortKey(entries[j].status)
 		if oi != oj {
@@ -117,33 +125,57 @@ func showLogs() error {
 	fmt.Println(strings.Join(headerParts, "  "))
 
 	if meta != nil {
+		subParts := []string{}
 		planValue := strings.TrimSpace(meta.PlanName)
 		if planValue == "" {
 			planValue = "plan"
 		}
 		if strings.TrimSpace(meta.PlanID) != "" {
-			planValue = planValue + " · " + meta.PlanID
+			subParts = append(subParts, "plan "+meta.PlanID)
 		}
-		fmt.Fprintf(os.Stdout, "%-12s %s\n", ui.Dim(color, "Plan"), planValue)
 		for _, link := range meta.Links {
-			fmt.Fprintf(os.Stdout, "%-12s %s\n", displayLinkLabel(link.Label, color), link.URL)
+			label := strings.TrimSpace(link.Label)
+			if label == "" {
+				label = "link"
+			}
+			subParts = append(subParts, label+" "+link.URL)
+		}
+		if len(subParts) > 0 {
+			fmt.Fprintln(os.Stdout, "  "+ui.Dim(color, strings.Join(subParts, "  ·  ")))
 		}
 	}
-	fmt.Println()
 
+	currentGroup := ""
 	for _, entry := range entries {
-		fmt.Printf("%s %s / %s\n", styleStatus(entry.status, color), entry.jobID, entry.stepID)
+		comp, env, short := splitJobID(entry.jobID)
+		group := comp
+		if env != "" {
+			group = comp + "  " + ui.Dim(color, "·  "+env)
+		}
+		if group != "" && group != currentGroup {
+			fmt.Println()
+			fmt.Println("  " + ui.Bold(color, group))
+			currentGroup = group
+		}
+		label := short
+		if label == "" {
+			label = entry.jobID
+		}
+		stepLabel := entry.stepID
+		if stepLabel != "" {
+			label += "  " + ui.Dim(color, stepLabel)
+		}
+		fmt.Printf("    %s %s\n", styleStatus(entry.status, color), ui.Bold(color, label))
 		lines := compactLogLines(entry.content, logsRaw)
 		for _, line := range lines {
-			fmt.Println(line)
+			fmt.Printf("       %s\n", line)
 		}
 		if !logsRaw {
 			totalLines := len(strings.Split(strings.TrimSpace(entry.content), "\n"))
 			if totalLines > len(lines) {
-				fmt.Printf("%s\n", ui.Dim(color, fmt.Sprintf("… %d more line%s", totalLines-len(lines), plural(totalLines-len(lines)))))
+				fmt.Printf("       %s\n", ui.Dim(color, fmt.Sprintf("… %d more line%s", totalLines-len(lines), plural(totalLines-len(lines)))))
 			}
 		}
-		fmt.Println()
 	}
 
 	return nil

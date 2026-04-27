@@ -73,7 +73,7 @@ func (jr *jobReport) defaultHeadline() string {
 	if jr.dryRun {
 		return fmt.Sprintf("Would run %d step%s", jr.stepCount, pluralSuffix(jr.stepCount))
 	}
-	return "Done"
+	return ""
 }
 
 func (r *Runner) shouldPrintPreflight(jobs []model.PlanJob) bool {
@@ -90,6 +90,67 @@ func (r *Runner) withPrintLock(fn func()) {
 	r.printMu.Lock()
 	defer r.printMu.Unlock()
 	fn()
+}
+
+// groupKey returns the grouping label for a job (component, optionally with env).
+func (r *Runner) groupKey(job model.PlanJob) string {
+	comp := strings.TrimSpace(job.Component)
+	env := strings.TrimSpace(job.Environment)
+	switch {
+	case comp == "" && env == "":
+		return ""
+	case comp == "":
+		return env
+	case env == "" || !r.groupMultiEnv:
+		return comp
+	default:
+		return comp + "  " + ui.Dim(r.Color, "·  "+env)
+	}
+}
+
+// groupKeyPlain returns a comparison-only group key (no styling).
+func (r *Runner) groupKeyPlain(job model.PlanJob) string {
+	comp := strings.TrimSpace(job.Component)
+	env := strings.TrimSpace(job.Environment)
+	if r.groupMultiEnv {
+		return comp + "@" + env
+	}
+	return comp
+}
+
+// emitGroupHeader prints a group header above the live region if the group
+// changed. Caller should not hold r.printMu.
+func (r *Runner) emitGroupHeader(job model.PlanJob) {
+	plain := r.groupKeyPlain(job)
+	r.groupMu.Lock()
+	changed := plain != r.currentGroup
+	r.currentGroup = plain
+	r.groupMu.Unlock()
+	if !changed {
+		return
+	}
+	header := r.groupKey(job)
+	if header == "" {
+		return
+	}
+	r.live.PrintBlock([]string{"", "  " + ui.Bold(r.Color, header)})
+}
+
+// shortJobName returns a compact display label for the job within its group.
+// It drops the component prefix (the group header carries that) and falls back
+// to job.Name.
+func shortJobName(job model.PlanJob) string {
+	if name := strings.TrimSpace(job.Name); name != "" {
+		return name
+	}
+	if name := strings.TrimSpace(job.ID); name != "" {
+		// Strip "<component>@<env>." prefix if present.
+		if idx := strings.LastIndex(name, "."); idx >= 0 && idx+1 < len(name) {
+			return name[idx+1:]
+		}
+		return name
+	}
+	return "job"
 }
 
 func (r *Runner) printStepStart(stepID string, index, total int) {
@@ -159,6 +220,15 @@ func (r *Runner) printStepSkipped(stepID string, index, total int) {
 	})
 }
 
+// updateLiveStep updates the spinner row label for an in-flight job.
+func (r *Runner) updateLiveStep(job model.PlanJob, stepID string) {
+	if r.live == nil {
+		return
+	}
+	label := fmt.Sprintf("%s  %s", shortJobName(job), ui.Dim(r.Color, stepID))
+	r.live.SetRow(job.ID, label)
+}
+
 func (r *Runner) printStepSuccess(step model.PlanStep, view stepOutputView, duration time.Duration) {
 	if !r.Verbose {
 		return
@@ -215,18 +285,25 @@ func (r *Runner) printStepFailure(job model.PlanJob, step model.PlanStep, view s
 	if headline == "" {
 		headline = summarizeExecError(err)
 	}
-	label := jobDisplayName(job)
-	r.withPrintLock(func() {
-		fmt.Fprintf(r.Stdout, "%s %-22s %6s   %s\n", ui.Red(r.Color, "✗"), ui.Bold(r.Color, label), formatStepDuration(duration), ui.Red(r.Color, headline))
-		fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Dim(r.Color, "step"), stepIdentifier(step))
-		fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Dim(r.Color, "error"), ui.Red(r.Color, summarizeExecError(err)))
-		if hint := stepFailureHint(err, workingDir); hint != "" {
-			fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Dim(r.Color, "hint"), hint)
-		}
-		if r.ExecID != "" {
-			fmt.Fprintf(r.Stdout, "  %s gluon logs --exec-id %s --job %s\n", ui.Dim(r.Color, "details"), r.ExecID, job.ID)
-		}
-	})
+	label := shortJobName(job)
+	lines := []string{
+		fmt.Sprintf("    %s %s  %s  %s",
+			ui.Red(r.Color, "✗"),
+			ui.Bold(r.Color, label),
+			ui.Dim(r.Color, formatStepDuration(duration)),
+			ui.Red(r.Color, headline),
+		),
+		fmt.Sprintf("       %s %s", ui.Dim(r.Color, "step"), stepIdentifier(step)),
+		fmt.Sprintf("       %s %s", ui.Dim(r.Color, "error"), ui.Red(r.Color, summarizeExecError(err))),
+	}
+	if hint := stepFailureHint(err, workingDir); hint != "" {
+		lines = append(lines, fmt.Sprintf("       %s %s", ui.Dim(r.Color, "hint"), hint))
+	}
+	if r.ExecID != "" {
+		lines = append(lines, fmt.Sprintf("       %s gluon logs --exec-id %s --job %s",
+			ui.Dim(r.Color, "logs"), r.ExecID, job.ID))
+	}
+	r.live.PrintBlock(lines)
 }
 
 func (r *Runner) printStepContinuation() {
@@ -236,30 +313,52 @@ func (r *Runner) printStepContinuation() {
 }
 
 func (r *Runner) printJobResumed(job model.PlanJob) {
-	r.withPrintLock(func() {
-		fmt.Fprintf(r.Stdout, "%s %-22s reused previous run\n", ui.Cyan(r.Color, "⚡"), ui.Bold(r.Color, jobDisplayName(job)))
-	})
+	r.emitGroupHeader(job)
+	r.live.Print(fmt.Sprintf("    %s %s  %s",
+		ui.Cyan(r.Color, "⚡"),
+		ui.Bold(r.Color, shortJobName(job)),
+		ui.Dim(r.Color, "cached"),
+	))
 }
 
 func (r *Runner) printJobFooter(job model.PlanJob, report *jobReport, success bool, duration time.Duration) {
-	label := jobDisplayName(job)
-	r.withPrintLock(func() {
-		if success {
-			fmt.Fprintf(r.Stdout, "%s %-22s %6s   %s\n", ui.Green(r.Color, "✓"), ui.Bold(r.Color, label), formatStepDuration(duration), report.defaultHeadline())
-			for _, link := range report.links {
-				fmt.Fprintf(r.Stdout, "  %s %-11s %s\n", ui.Cyan(r.Color, "↗"), linkLabel(link.Label), link.URL)
-			}
-			return
+	r.live.RemoveRow(job.ID)
+	label := shortJobName(job)
+	if success {
+		head := report.defaultHeadline()
+		line := fmt.Sprintf("    %s %s  %s",
+			ui.Green(r.Color, "✓"),
+			ui.Bold(r.Color, label),
+			ui.Dim(r.Color, formatStepDuration(duration)),
+		)
+		if head != "" {
+			line += "  " + ui.Dim(r.Color, head)
 		}
+		lines := []string{line}
+		for _, link := range report.links {
+			lines = append(lines, fmt.Sprintf("       %s %s  %s",
+				ui.Cyan(r.Color, "↗"),
+				ui.Dim(r.Color, linkLabel(link.Label)),
+				link.URL,
+			))
+		}
+		r.live.PrintBlock(lines)
+		return
+	}
 
-		fmt.Fprintf(r.Stdout, "%s %-22s %6s   %s\n", ui.Red(r.Color, "✗"), ui.Bold(r.Color, label), formatStepDuration(duration), ui.Red(r.Color, "Job failed"))
-		if report.defaultHeadline() != "Done" {
-			fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Dim(r.Color, "summary"), report.defaultHeadline())
-		}
-		if r.ExecID != "" {
-			fmt.Fprintf(r.Stdout, "  %s gluon logs --exec-id %s --job %s\n", ui.Dim(r.Color, "details"), r.ExecID, job.ID)
-		}
-	})
+	lines := []string{
+		fmt.Sprintf("    %s %s  %s  %s",
+			ui.Red(r.Color, "✗"),
+			ui.Bold(r.Color, label),
+			ui.Dim(r.Color, formatStepDuration(duration)),
+			ui.Red(r.Color, "failed"),
+		),
+	}
+	if r.ExecID != "" {
+		lines = append(lines, fmt.Sprintf("       %s gluon logs --exec-id %s --job %s",
+			ui.Dim(r.Color, "logs"), r.ExecID, job.ID))
+	}
+	r.live.PrintBlock(lines)
 }
 
 func (r *Runner) printBlock(title string, lines []string) {
@@ -276,6 +375,9 @@ func (r *Runner) printBlock(title string, lines []string) {
 }
 
 func (r *Runner) printInlineDetail(label, value string) {
+	if !r.Verbose {
+		return
+	}
 	r.withPrintLock(func() {
 		fmt.Fprintf(r.Stdout, "  %s %-11s %s\n", ui.Dim(r.Color, "·"), label, ui.Dim(r.Color, value))
 	})
@@ -284,6 +386,9 @@ func (r *Runner) printInlineDetail(label, value string) {
 func (r *Runner) printRunSummary(summary *runSummary, finalStatus string) {
 	if summary == nil {
 		return
+	}
+	if r.live != nil {
+		r.live.Stop()
 	}
 
 	snap := summary.snapshot()
@@ -300,38 +405,42 @@ func (r *Runner) printRunSummary(summary *runSummary, finalStatus string) {
 		}
 	}
 	if snap.resumed > 0 {
-		stats = append(stats, fmt.Sprintf("%d resumed", snap.resumed))
+		stats = append(stats, fmt.Sprintf("%d cached", snap.resumed))
 	}
 	if snap.waiting > 0 {
 		stats = append(stats, fmt.Sprintf("%d waiting", snap.waiting))
 	}
 
-	statusLine := fmt.Sprintf("Succeeded in %s", formatStepDuration(snap.duration))
+	statusLine := ui.Green(r.Color, fmt.Sprintf("✓ Done in %s", formatStepDuration(snap.duration)))
 	if r.DryRun {
-		statusLine = fmt.Sprintf("Preview ready in %s", formatStepDuration(snap.duration))
+		statusLine = ui.Cyan(r.Color, fmt.Sprintf("◌ Preview ready in %s", formatStepDuration(snap.duration)))
 	} else if strings.EqualFold(finalStatus, "failed") {
-		statusLine = fmt.Sprintf("Failed in %s", formatStepDuration(snap.duration))
+		statusLine = ui.Red(r.Color, fmt.Sprintf("✗ Failed in %s", formatStepDuration(snap.duration)))
 	}
 
 	r.withPrintLock(func() {
 		fmt.Fprintln(r.Stdout)
 		fmt.Fprintln(r.Stdout, ui.Bold(r.Color, statusLine))
 		if len(stats) > 0 {
-			fmt.Fprintln(r.Stdout, strings.Join(stats, " · "))
+			fmt.Fprintln(r.Stdout, "  "+ui.Dim(r.Color, strings.Join(stats, " · ")))
 		}
 		if snap.cacheHits > 0 {
-			fmt.Fprintf(r.Stdout, "%-12s %d local hit%s\n", ui.Dim(r.Color, "Cache"), snap.cacheHits, pluralSuffix(snap.cacheHits))
+			fmt.Fprintf(r.Stdout, "  %s %d local hit%s\n",
+				ui.Dim(r.Color, "cache"), snap.cacheHits, pluralSuffix(snap.cacheHits))
 		}
 		for _, link := range snap.links {
-			fmt.Fprintf(r.Stdout, "%-12s %s\n", linkLabel(link.Label), link.URL)
+			fmt.Fprintf(r.Stdout, "  %s %s\n", ui.Dim(r.Color, linkLabel(link.Label)), link.URL)
 		}
 		if r.ExecID != "" && !r.DryRun {
-			fmt.Fprintf(r.Stdout, "%-12s gluon status --exec-id %s\n", ui.Dim(r.Color, "Status"), r.ExecID)
+			fmt.Fprintln(r.Stdout)
+			fmt.Fprintf(r.Stdout, "  %s  gluon status --exec-id %s\n",
+				ui.Dim(r.Color, "status"), r.ExecID)
 			logsCommand := fmt.Sprintf("gluon logs --exec-id %s", r.ExecID)
 			if strings.EqualFold(finalStatus, "failed") {
 				logsCommand += " --failed"
 			}
-			fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Logs"), logsCommand)
+			fmt.Fprintf(r.Stdout, "  %s  %s\n",
+				ui.Dim(r.Color, "logs  "), logsCommand)
 		}
 	})
 }

@@ -40,6 +40,11 @@ type Runner struct {
 	FilterEnv          string
 	printMu            sync.Mutex
 	stateMu            sync.Mutex
+
+	live          *ui.LiveRegion
+	groupMu       sync.Mutex
+	currentGroup  string
+	groupMultiEnv bool
 }
 
 // State is kept for backwards compat with tests referencing old types.
@@ -259,10 +264,17 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		}
 	}
 
+	r.groupMultiEnv = singleEnvironment(orderedJobs) == ""
+	r.live = ui.NewLiveRegion(r.Stdout, ui.IsInteractiveWriter(r.Stdout), r.Color)
+
 	if r.shouldPrintPreflight(orderedJobs) {
 		r.printRunHeader(plan, orderedJobs)
-		r.printReadinessSnapshot(orderedJobs, execState)
+		if r.Verbose {
+			r.printReadinessSnapshot(orderedJobs, execState)
+		}
 	}
+	r.live.Start()
+	defer r.live.Stop()
 
 	if !r.DryRun {
 		if err := r.Executor.Prepare(baseExecContext); err != nil {
@@ -301,7 +313,9 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 		unmet := unresolvedDependencies(job, execState)
 		if len(unmet) > 0 {
 			summary.addWaiting(1)
-			r.printWaiting(job, unmet, execState)
+			if r.Verbose || r.JobID != "" {
+				r.printWaiting(job, unmet, execState)
+			}
 			if r.JobID != "" {
 				return fmt.Errorf("cannot run %s: dependencies not completed (%s)", job.ID, strings.Join(unmet, ", "))
 			}
@@ -382,6 +396,7 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		retryCount := r.resolveRetryCount(job, step)
 		timeoutValue := r.resolveTimeout(job, step)
 		stepStartedAt := time.Now()
+		r.updateLiveStep(job, stepID)
 		r.printStepStart(stepID, idx+1, len(job.Steps))
 		r.printStepContext(step, workingDir, timeoutValue, retryCount)
 		if r.DryRun {
@@ -723,32 +738,36 @@ func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 		planLabel = "plan"
 	}
 	planID := state.PlanChecksumShort(plan)
+
 	scopeParts := make([]string, 0, 4)
+	scopeParts = append(scopeParts, fmt.Sprintf("%d task%s", len(jobs), pluralSuffix(len(jobs))))
+	if r.Concurrency > 1 {
+		scopeParts = append(scopeParts, fmt.Sprintf("%d× parallel", r.Concurrency))
+	}
+	scopeParts = append(scopeParts, displayRunnerName(r.Executor.Name()))
 	if env := singleEnvironment(jobs); env != "" {
 		scopeParts = append(scopeParts, env)
 	}
-	scopeParts = append(scopeParts, fmt.Sprintf("%d task%s", len(jobs), pluralSuffix(len(jobs))))
-	if r.Concurrency > 1 {
-		scopeParts = append(scopeParts, fmt.Sprintf("%d-way parallel", r.Concurrency))
-	}
-	scopeParts = append(scopeParts, displayRunnerName(r.Executor.Name()))
 
 	r.withPrintLock(func() {
-		fmt.Fprintf(r.Stdout, "%s  %s\n", ui.BoldCyan(r.Color, "gluon run"), ui.Bold(r.Color, planLabel))
-		fmt.Fprintln(r.Stdout, ui.Dim(r.Color, strings.Join(scopeParts, " · ")))
-		fmt.Fprintln(r.Stdout)
-		if r.ExecID != "" && !r.DryRun {
-			fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Run"), r.ExecID)
-		}
-		planValue := planLabel
+		fmt.Fprintf(r.Stdout, "\n%s %s   %s\n",
+			ui.BoldCyan(r.Color, "▲ gluon"),
+			ui.Bold(r.Color, planLabel),
+			ui.Dim(r.Color, strings.Join(scopeParts, " · ")),
+		)
+		subParts := []string{}
 		if planID != "" {
-			planValue = planValue + " · " + planID
+			subParts = append(subParts, "plan "+planID)
 		}
-		fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Plan"), planValue)
+		if r.ExecID != "" && !r.DryRun {
+			subParts = append(subParts, "run "+r.ExecID)
+		}
 		if r.JobID != "" {
-			fmt.Fprintf(r.Stdout, "%-12s %s\n", ui.Dim(r.Color, "Target"), r.JobID)
+			subParts = append(subParts, "target "+r.JobID)
 		}
-		fmt.Fprintln(r.Stdout)
+		if len(subParts) > 0 {
+			fmt.Fprintln(r.Stdout, "  "+ui.Dim(r.Color, strings.Join(subParts, "  ·  ")))
+		}
 	})
 }
 
@@ -823,6 +842,14 @@ func (r *Runner) printWaiting(job model.PlanJob, unmet []string, execState *stat
 			status = depState.Status
 		}
 		dependencies = append(dependencies, fmt.Sprintf("%s (%s)", dep, status))
+	}
+	if r.live != nil {
+		r.live.Print(fmt.Sprintf("    %s %s  %s",
+			ui.Yellow(r.Color, "⏳"),
+			ui.Bold(r.Color, shortJobName(job)),
+			ui.Dim(r.Color, "waiting on "+strings.Join(dependencies, ", ")),
+		))
+		return
 	}
 	r.withPrintLock(func() {
 		fmt.Fprintf(r.Stdout, "%s %-22s waiting on %s\n", ui.Yellow(r.Color, "⏳"), ui.Bold(r.Color, jobDisplayName(job)), strings.Join(dependencies, ", "))
@@ -1059,6 +1086,7 @@ func (r *Runner) printPhaseHeader(phase string) {
 }
 
 func (r *Runner) printJobHeader(job model.PlanJob) {
+	r.emitGroupHeader(job)
 	if r.Verbose {
 		r.withPrintLock(func() {
 			fmt.Fprintf(r.Stdout, "\n%s Job %s\n", ui.Cyan(r.Color, "╭─"), ui.Bold(r.Color, job.ID))
@@ -1066,9 +1094,9 @@ func (r *Runner) printJobHeader(job model.PlanJob) {
 		})
 		return
 	}
-	r.withPrintLock(func() {
-		fmt.Fprintf(r.Stdout, "%s %s\n", ui.Blue(r.Color, "●"), ui.Bold(r.Color, jobDisplayName(job)))
-	})
+	if r.live != nil {
+		r.live.SetRow(job.ID, shortJobName(job))
+	}
 }
 
 func (r *Runner) printFailureBlock(err error, output, workingDir string) {

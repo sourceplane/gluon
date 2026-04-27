@@ -76,3 +76,27 @@ func Cyan(enabled bool, text string) string {
 func BoldCyan(enabled bool, text string) string {
 	return Style(enabled, text, "1", "36")
 }
+
+func IsInteractiveWriter(w io.Writer) bool {
+	if isCI() {
+		return false
+	}
+	f, ok := w.(*os.File)
+	if !ok {
+		return false
+	}
+	info, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (info.Mode() & os.ModeCharDevice) != 0
+}
+
+func isCI() bool {
+	for _, key := range []string{"CI", "GITHUB_ACTIONS", "GITLAB_CI", "CIRCLECI", "BUILDKITE", "JENKINS_URL"} {
+		if v := strings.TrimSpace(os.Getenv(key)); v != "" && !strings.EqualFold(v, "false") {
+			return true
+		}
+	}
+	return false
+}
