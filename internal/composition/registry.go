@@ -639,7 +639,7 @@ func resolveArchiveSource(baseDir string, source model.CompositionSource, index 
 }
 
 func resolveOCISource(source model.CompositionSource, index int) (*sourcePackage, error) {
-	remoteRef := strings.TrimPrefix(strings.TrimSpace(source.Ref), "oci://")
+	remoteRef := normalizeOCIRef(source.Ref)
 	if remoteRef == "" {
 		return nil, fmt.Errorf("composition source %s ref cannot be empty", source.Name)
 	}

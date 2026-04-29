@@ -156,4 +156,5 @@ func init() {
 	registerGetCommand(rootCmd)
 	registerDescribeCommand(rootCmd)
 	registerGCCommand(rootCmd)
+	registerPublishCommand(rootCmd)
 }
