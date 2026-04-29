@@ -26,7 +26,7 @@ type LiveRegion struct {
 	rows         []liveRow
 	rowIndex     map[string]int
 	frame        int
-	headerFunc   func() []string
+	headerFunc   func(activeRows int) []string
 	windowMax    int
 	stop         chan struct{}
 	done         chan struct{}
@@ -59,8 +59,10 @@ func NewLiveRegion(w io.Writer, tty, color bool) *LiveRegion {
 }
 
 // SetHeaderFunc registers a callback that returns sticky header lines drawn
-// above the active rows on every frame. Pass nil to clear.
-func (l *LiveRegion) SetHeaderFunc(fn func() []string) {
+// above the active rows on every frame. The callback receives the current
+// number of active rows so callers do not need to call RowCount (which would
+// deadlock because draw holds the mutex). Pass nil to clear.
+func (l *LiveRegion) SetHeaderFunc(fn func(activeRows int) []string) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.headerFunc = fn
@@ -219,7 +221,7 @@ func (l *LiveRegion) draw() {
 	var lines []string
 
 	if l.headerFunc != nil {
-		for _, h := range l.headerFunc() {
+		for _, h := range l.headerFunc(len(l.rows)) {
 			lines = append(lines, h)
 		}
 	}

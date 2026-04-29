@@ -297,8 +297,8 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 	}
 	totalJobs := len(orderedJobs)
 	summary := newRunSummary()
-	r.live.SetHeaderFunc(func() []string {
-		return r.dashboardHeaderLines(totalJobs, summary)
+	r.live.SetHeaderFunc(func(activeRows int) []string {
+		return r.dashboardHeaderLines(totalJobs, activeRows, summary)
 	})
 	r.live.Start()
 	defer r.live.Stop()
@@ -855,17 +855,13 @@ func (r *Runner) printRunHeader(plan *model.Plan, jobs []model.PlanJob) {
 
 // dashboardHeaderLines builds the sticky header rendered above the active
 // section: a one-glance status legend plus a progress bar.
-func (r *Runner) dashboardHeaderLines(totalJobs int, summary *runSummary) []string {
+func (r *Runner) dashboardHeaderLines(totalJobs int, running int, summary *runSummary) []string {
 	if summary == nil {
 		return nil
 	}
 	snap := summary.snapshot()
 	succeeded := snap.completed + snap.resumed
 	failed := snap.failed
-	running := 0
-	if r.live != nil {
-		running = r.live.RowCount()
-	}
 	queued := totalJobs - succeeded - failed - running
 	if queued < 0 {
 		queued = 0
