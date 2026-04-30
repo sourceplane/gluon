@@ -4,11 +4,12 @@ import (
 	"archive/tar"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -16,6 +17,9 @@ import (
 	"github.com/santhosh-tekuri/jsonschema/v5"
 	"github.com/sourceplane/orun/internal/model"
 	"gopkg.in/yaml.v3"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
 )
 
 const (
@@ -1021,10 +1025,6 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 		return cacheDir, nil
 	}
 
-	if _, err := exec.LookPath("oras"); err != nil {
-		return "", fmt.Errorf("oras is required to pull OCI composition sources")
-	}
-
 	tempDir, err := os.MkdirTemp(root, filepath.Base(cacheDir)+"-tmp-")
 	if err != nil {
 		return "", err
@@ -1045,52 +1045,66 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 }
 
 // fetchAndExtractOCICompositionsLayer fetches the compositions layer from an OCI artifact
-// (using oras manifest fetch + oras blob fetch) and extracts the tar+gzip into destDir.
+// using the oras-go library (no external oras CLI required) and extracts it into destDir.
 // It prefers compositionsLayerMediaType, falls back to compositionPackageLayerType.
 func fetchAndExtractOCICompositionsLayer(remoteRef, destDir string) error {
-	// Fetch manifest to locate the layer digest.
-	manifestCmd := exec.Command("oras", "manifest", "fetch", remoteRef, "--format", "json")
-	manifestJSON, err := manifestCmd.Output()
+	repoRef := stripRefTagOrDigest(remoteRef)
+	ref := normalizeOCIRef(remoteRef)
+
+	ctx := context.Background()
+	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
 	if err != nil {
-		return fmt.Errorf("oras manifest fetch failed: %w", err)
+		return fmt.Errorf("failed to load Docker credential store: %w", err)
+	}
+	repo, err := remote.NewRepository(repoRef)
+	if err != nil {
+		return fmt.Errorf("invalid OCI ref %q: %w", repoRef, err)
+	}
+	repo.Client = &auth.Client{
+		Client:     &http.Client{},
+		Cache:      auth.NewCache(),
+		Credential: credentials.Credential(credStore),
 	}
 
-	layerDigest, err := pickCompositionsLayerDigest(manifestJSON)
+	// Fetch manifest to pick the compositions layer.
+	_, manifestReader, err := repo.FetchReference(ctx, ref)
+	if err != nil {
+		return fmt.Errorf("failed to fetch manifest for %s: %w", remoteRef, err)
+	}
+	manifestData, err := io.ReadAll(manifestReader)
+	if err != nil {
+		return fmt.Errorf("failed to read manifest for %s: %w", remoteRef, err)
+	}
+
+	layerDigest, err := pickCompositionsLayerDigest(manifestData)
 	if err != nil {
 		return err
 	}
 
-	// Build blob ref: strip tag/digest from remoteRef, append layer digest.
-	repoRef := stripRefTagOrDigest(remoteRef)
-	blobRef := repoRef + "@" + layerDigest
-
-	// Fetch blob bytes.
-	blobCmd := exec.Command("oras", "blob", "fetch", blobRef, "--output", "-")
-	blobBytes, err := blobCmd.Output()
+	// Fetch the layer blob.
+	_, blobReader, err := repo.Blobs().FetchReference(ctx, layerDigest)
 	if err != nil {
-		return fmt.Errorf("oras blob fetch failed: %w", err)
+		return fmt.Errorf("failed to fetch OCI blob %s: %w", layerDigest, err)
 	}
+	defer blobReader.Close()
 
-	// Extract tar+gzip into destDir.
-	return extractTarGzReader(bytes.NewReader(blobBytes), destDir)
+	return extractTarGzReader(blobReader, destDir)
 }
 
-// pickCompositionsLayerDigest parses the oras manifest JSON and returns the digest of
+// pickCompositionsLayerDigest parses a raw OCI manifest JSON and returns the digest of
 // the best layer: compositionsLayerMediaType first, then compositionPackageLayerType,
 // then the first layer of any media type.
 func pickCompositionsLayerDigest(manifestJSON []byte) (string, error) {
 	var doc struct {
-		Content struct {
-			Layers []struct {
-				Digest    string `json:"digest"`
-				MediaType string `json:"mediaType"`
-			} `json:"layers"`
-		} `json:"content"`
+		Layers []struct {
+			Digest    string `json:"digest"`
+			MediaType string `json:"mediaType"`
+		} `json:"layers"`
 	}
 	if err := json.Unmarshal(manifestJSON, &doc); err != nil {
 		return "", fmt.Errorf("failed to parse manifest JSON: %w", err)
 	}
-	layers := doc.Content.Layers
+	layers := doc.Layers
 	if len(layers) == 0 {
 		return "", fmt.Errorf("OCI manifest has no layers")
 	}
@@ -1160,37 +1174,30 @@ func extractTarGzReader(r io.Reader, destDir string) error {
 	return nil
 }
 
-// ociArtifactIsStack fetches the OCI manifest and returns true when at least one layer
-// carries the stack compositions media type, meaning selective layer pull is safe.
-func ociArtifactIsStack(remoteRef string) (bool, error) {
-	cmd := exec.Command("oras", "manifest", "fetch", remoteRef, "--format", "json")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		return false, fmt.Errorf("oras manifest fetch failed: %w", err)
-	}
-	return strings.Contains(string(output), compositionsLayerMediaType), nil
-}
-
+// resolveOCIDigest fetches the manifest for remoteRef and returns its digest.
 func resolveOCIDigest(remoteRef string) (string, error) {
-	if _, err := exec.LookPath("oras"); err != nil {
-		return "", fmt.Errorf("oras is required to resolve OCI composition sources")
-	}
+	ctx := context.Background()
+	ref := normalizeOCIRef(remoteRef)
 
-	cmd := exec.Command("oras", "manifest", "fetch", remoteRef, "--format", "json")
-	output, err := cmd.CombinedOutput()
+	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
 	if err != nil {
-		return "", fmt.Errorf("oras manifest fetch failed: %w\n%s", err, strings.TrimSpace(string(output)))
+		return "", fmt.Errorf("failed to load Docker credential store: %w", err)
 	}
 
-	var manifest struct {
-		Digest string `json:"digest"`
+	repoRef := stripRefTagOrDigest(ref)
+	repo, err := remote.NewRepository(repoRef)
+	if err != nil {
+		return "", fmt.Errorf("invalid OCI ref %q: %w", repoRef, err)
 	}
-	if err := json.Unmarshal(output, &manifest); err != nil {
-		return "", fmt.Errorf("failed to parse oras manifest output: %w", err)
-	}
-	if strings.TrimSpace(manifest.Digest) == "" {
-		return "", fmt.Errorf("oras manifest output did not include a digest")
+	repo.Client = &auth.Client{
+		Client:     &http.Client{},
+		Cache:      auth.NewCache(),
+		Credential: credentials.Credential(credStore),
 	}
 
-	return manifest.Digest, nil
+	desc, err := repo.Resolve(ctx, ref)
+	if err != nil {
+		return "", fmt.Errorf("failed to resolve OCI ref %s: %w", remoteRef, err)
+	}
+	return desc.Digest.String(), nil
 }
