@@ -88,6 +88,44 @@ type CompositionDependency struct {
 	Optional bool   `yaml:"optional,omitempty" json:"optional,omitempty"`
 }
 
+// Stack is the new-format package manifest (replaces CompositionPackage / orun.yaml).
+// It lives at stack.yaml in the package root and uses apiVersion: orun.io/v1.
+type Stack struct {
+	APIVersion string        `yaml:"apiVersion" json:"apiVersion"`
+	Kind       string        `yaml:"kind" json:"kind"`
+	Metadata   StackMetadata `yaml:"metadata" json:"metadata"`
+	Registry   StackRegistry `yaml:"registry" json:"registry"`
+	Spec       StackSpec     `yaml:"spec" json:"spec"`
+}
+
+// StackMetadata holds human-facing metadata for a stack package.
+type StackMetadata struct {
+	Name        string   `yaml:"name" json:"name"`
+	Title       string   `yaml:"title,omitempty" json:"title,omitempty"`
+	Version     string   `yaml:"version" json:"version"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Owner       string   `yaml:"owner,omitempty" json:"owner,omitempty"`
+	Tags        []string `yaml:"tags,omitempty" json:"tags,omitempty"`
+}
+
+// StackRegistry describes the OCI registry where the stack is published.
+type StackRegistry struct {
+	Host       string `yaml:"host" json:"host"`
+	Namespace  string `yaml:"namespace" json:"namespace"`
+	Repository string `yaml:"repository" json:"repository"`
+	Visibility string `yaml:"visibility,omitempty" json:"visibility,omitempty"`
+}
+
+// StackSpec lists the composition files included in the stack.
+type StackSpec struct {
+	Compositions []StackCompositionEntry `yaml:"compositions" json:"compositions"`
+}
+
+// StackCompositionEntry is a path reference to a composition job.yaml within the stack.
+type StackCompositionEntry struct {
+	Path string `yaml:"path" json:"path"`
+}
+
 // CompositionLock records resolved source digests for reproducible planning.
 type CompositionLock struct {
 	APIVersion string                  `yaml:"apiVersion" json:"apiVersion"`

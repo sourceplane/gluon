@@ -28,6 +28,11 @@ import (
 const (
 	compositionPackageArtifactType = "application/vnd.sourceplane.orun.composition.package.v1"
 	compositionPackageLayerType    = "application/vnd.sourceplane.orun.composition.package.layer.v1.tar+gzip"
+
+	// Stack OCI media types (orun.io/v1 / kind: Stack format).
+	stackArtifactType            = "application/vnd.orun.stack.v1"
+	compositionsLayerMediaType   = "application/vnd.orun.stack.compositions.layer.v1+tar+gzip"
+	examplesLayerMediaType       = "application/vnd.orun.stack.examples.layer.v1+tar+gzip"
 )
 
 // BuildPackageArchive validates a composition package directory and writes a .tgz archive to disk.
@@ -74,8 +79,13 @@ func BuildPackageArchive(rootDir, outputPath string) error {
 	return writeTarEntries(tarWriter, rootDir, absOutput)
 }
 
-// StreamPublishPackage streams a composition package to an OCI registry in a single pass:
-// walk files → tar → gzip → sha256 (computed while streaming) → upload blob.
+// StreamPublishPackage streams a composition package to an OCI registry in a single pass.
+// When the package root contains a compositions/ subdirectory (new Stack format), two
+// separate OCI layers are produced:
+//   - compositions layer (stack.yaml + compositions/ tree): media type compositionsLayerMediaType
+//   - examples layer (examples/ tree, if present): media type examplesLayerMediaType
+//
+// Legacy packages (orun.yaml, flat layout) are pushed as a single layer.
 // No temporary file is written to disk.
 func StreamPublishPackage(rootDir, ociRef string) error {
 	rootDir = filepath.Clean(rootDir)
@@ -88,12 +98,181 @@ func StreamPublishPackage(rootDir, ociRef string) error {
 		return fmt.Errorf("package validation failed: %w", err)
 	}
 
+	// Detect new Stack layout: compositions/ subdirectory present.
+	compositionsDir := filepath.Join(rootDir, "compositions")
+	if info, err := os.Stat(compositionsDir); err == nil && info.IsDir() {
+		return pushStackPackage(rootDir, ociRef)
+	}
+
+	// Legacy single-layer push.
 	archiveBytes, digestStr, err := buildArchiveInMemory(rootDir)
 	if err != nil {
 		return err
 	}
-
 	return pushToRegistry(archiveBytes, digestStr, ociRef)
+}
+
+// pushStackPackage builds two OCI layers (compositions + optional examples) and pushes
+// them as a multi-layer stack artifact.
+func pushStackPackage(rootDir, ociRef string) error {
+	ctx := context.Background()
+	ociRef = strings.TrimPrefix(strings.TrimSpace(ociRef), "oci://")
+
+	registry, repository, tag := splitRefParts(ociRef)
+	if registry == "" || repository == "" {
+		return fmt.Errorf("invalid OCI ref %q: expected <registry>/<repo>[:tag]", ociRef)
+	}
+	if tag == "" {
+		tag = "latest"
+	}
+
+	credStore, err := credentials.NewStoreFromDocker(credentials.StoreOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to load Docker credential store: %w", err)
+	}
+
+	repo, err := remote.NewRepository(registry + "/" + repository)
+	if err != nil {
+		return fmt.Errorf("failed to create remote repository: %w", err)
+	}
+	repo.Client = &auth.Client{
+		Client:     &http.Client{},
+		Cache:      auth.NewCache(),
+		Credential: credentials.Credential(credStore),
+	}
+
+	store := memory.New()
+	var layers []ocispec.Descriptor
+
+	// Build compositions layer: stack.yaml at root + compositions/ tree.
+	compBytes, compDigest, err := buildFilteredArchiveInMemory(rootDir, func(relPath string) bool {
+		return relPath == "stack.yaml" || relPath == "orun.yaml" ||
+			strings.HasPrefix(filepath.ToSlash(relPath), "compositions/")
+	})
+	if err != nil {
+		return fmt.Errorf("failed to build compositions layer: %w", err)
+	}
+	compDesc := ocispec.Descriptor{
+		MediaType: compositionsLayerMediaType,
+		Digest:    godigest.Digest(compDigest),
+		Size:      int64(len(compBytes)),
+	}
+	if err := store.Push(ctx, compDesc, bytes.NewReader(compBytes)); err != nil {
+		return fmt.Errorf("failed to stage compositions layer: %w", err)
+	}
+	layers = append(layers, compDesc)
+
+	// Build examples layer if examples/ directory exists and is non-empty.
+	examplesDir := filepath.Join(rootDir, "examples")
+	if info, statErr := os.Stat(examplesDir); statErr == nil && info.IsDir() {
+		exBytes, exDigest, buildErr := buildFilteredArchiveInMemory(rootDir, func(relPath string) bool {
+			return strings.HasPrefix(filepath.ToSlash(relPath), "examples/")
+		})
+		if buildErr != nil {
+			return fmt.Errorf("failed to build examples layer: %w", buildErr)
+		}
+		if len(exBytes) > 0 {
+			exDesc := ocispec.Descriptor{
+				MediaType: examplesLayerMediaType,
+				Digest:    godigest.Digest(exDigest),
+				Size:      int64(len(exBytes)),
+			}
+			if err := store.Push(ctx, exDesc, bytes.NewReader(exBytes)); err != nil {
+				return fmt.Errorf("failed to stage examples layer: %w", err)
+			}
+			layers = append(layers, exDesc)
+		}
+	}
+
+	manifestDesc, err := oras.PackManifest(ctx, store, oras.PackManifestVersion1_1, stackArtifactType, oras.PackManifestOptions{
+		Layers: layers,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to pack OCI manifest: %w", err)
+	}
+	if err := store.Tag(ctx, manifestDesc, tag); err != nil {
+		return fmt.Errorf("failed to tag manifest: %w", err)
+	}
+	if _, err := oras.Copy(ctx, store, tag, repo, tag, oras.DefaultCopyOptions); err != nil {
+		return fmt.Errorf("oras push failed: %w", err)
+	}
+	return nil
+}
+
+// buildFilteredArchiveInMemory builds a tar+gzip archive from the files in rootDir
+// that satisfy the keep predicate (relPath is slash-separated relative to rootDir).
+func buildFilteredArchiveInMemory(rootDir string, keep func(relPath string) bool) ([]byte, string, error) {
+	var buf bytes.Buffer
+	h := sha256.New()
+	mw := io.MultiWriter(&buf, h)
+
+	gw := gzip.NewWriter(mw)
+	tw := tar.NewWriter(gw)
+
+	if err := writeFilteredTarEntries(tw, rootDir, keep); err != nil {
+		return nil, "", fmt.Errorf("failed to build filtered archive: %w", err)
+	}
+	if err := tw.Close(); err != nil {
+		return nil, "", err
+	}
+	if err := gw.Close(); err != nil {
+		return nil, "", err
+	}
+
+	digestStr := "sha256:" + hex.EncodeToString(h.Sum(nil))
+	return buf.Bytes(), digestStr, nil
+}
+
+// writeFilteredTarEntries writes files under rootDir that satisfy the keep predicate.
+func writeFilteredTarEntries(tw *tar.Writer, rootDir string, keep func(relPath string) bool) error {
+	var files []string
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			return err
+		}
+		if keep(relPath) {
+			files = append(files, path)
+		}
+		return nil
+	})
+	if err != nil {
+		return fmt.Errorf("failed to walk package root %s: %w", rootDir, err)
+	}
+	sort.Strings(files)
+
+	for _, path := range files {
+		info, err := os.Stat(path)
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(rootDir, path)
+		if err != nil {
+			return err
+		}
+		header, err := tar.FileInfoHeader(info, "")
+		if err != nil {
+			return err
+		}
+		header.Name = filepath.ToSlash(relPath)
+		if err := tw.WriteHeader(header); err != nil {
+			return err
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		if _, err := tw.Write(data); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // buildArchiveInMemory builds a tar+gzip archive in memory, computing the sha256 digest

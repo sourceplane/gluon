@@ -19,6 +19,7 @@ import (
 const (
 	compositionKind        = "Composition"
 	compositionPackageKind = "CompositionPackage"
+	stackKind              = "Stack"
 	lockAPIVersion         = "sourceplane.io/v1alpha1"
 	lockKind               = "CompositionLock"
 	legacySourceName       = "legacy-config-dir"
@@ -660,23 +661,17 @@ func resolveOCISource(source model.CompositionSource, index int) (*sourcePackage
 }
 
 func loadPackageSource(rootDir string, source model.CompositionSource, digest string, index int) (*sourcePackage, error) {
-	manifestPath := filepath.Join(rootDir, "orun.yaml")
-	data, err := os.ReadFile(manifestPath)
+	manifest, err := loadManifestFromRoot(rootDir, source.Name)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read package manifest for source %s: %w", source.Name, err)
+		return nil, err
 	}
-
-	var manifest model.CompositionPackage
-	if err := yaml.Unmarshal(data, &manifest); err != nil {
-		return nil, fmt.Errorf("failed to parse package manifest for source %s: %w", source.Name, err)
-	}
-	if err := validatePackageManifest(source.Name, manifest); err != nil {
+	if err := validatePackageManifest(source.Name, *manifest); err != nil {
 		return nil, err
 	}
 
 	resolved := &sourcePackage{
 		declared:     source,
-		manifest:     manifest,
+		manifest:     *manifest,
 		resolvedRoot: rootDir,
 		compositions: make(map[string]*Composition),
 		resolvedMetadata: model.ResolvedCompositionSource{
@@ -691,7 +686,7 @@ func loadPackageSource(rootDir string, source model.CompositionSource, digest st
 	}
 
 	for _, export := range manifest.Spec.Exports {
-		composition, err := loadExportedComposition(rootDir, source, manifest, export, digest)
+		composition, err := loadExportedComposition(rootDir, source, *manifest, export, digest)
 		if err != nil {
 			return nil, err
 		}
@@ -701,6 +696,27 @@ func loadPackageSource(rootDir string, source model.CompositionSource, digest st
 
 	sort.Strings(resolved.resolvedMetadata.Exports)
 	return resolved, nil
+}
+
+// loadManifestFromRoot reads stack.yaml (preferred) or orun.yaml from rootDir,
+// converting a Stack manifest to the internal CompositionPackage representation.
+func loadManifestFromRoot(rootDir, sourceName string) (*model.CompositionPackage, error) {
+	if data, err := os.ReadFile(filepath.Join(rootDir, "stack.yaml")); err == nil {
+		pkg, convErr := stackYAMLToCompositionPackage(data)
+		if convErr != nil {
+			return nil, fmt.Errorf("failed to parse stack.yaml for source %s: %w", sourceName, convErr)
+		}
+		return pkg, nil
+	}
+	data, err := os.ReadFile(filepath.Join(rootDir, "orun.yaml"))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read package manifest for source %s: %w", sourceName, err)
+	}
+	var manifest model.CompositionPackage
+	if err := yaml.Unmarshal(data, &manifest); err != nil {
+		return nil, fmt.Errorf("failed to parse package manifest for source %s: %w", sourceName, err)
+	}
+	return &manifest, nil
 }
 
 func validatePackageManifest(sourceName string, manifest model.CompositionPackage) error {
@@ -929,8 +945,10 @@ func ensureCachedDirectory(srcDir, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	manifestPath := filepath.Join(cacheDir, "orun.yaml")
-	if _, err := os.Stat(manifestPath); err == nil {
+	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
+		return cacheDir, nil
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
 		return cacheDir, nil
 	}
 
@@ -958,8 +976,10 @@ func ensureCachedArchive(archivePath, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	manifestPath := filepath.Join(cacheDir, "orun.yaml")
-	if _, err := os.Stat(manifestPath); err == nil {
+	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
+		return cacheDir, nil
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
 		return cacheDir, nil
 	}
 
@@ -987,8 +1007,11 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 		return "", err
 	}
 	cacheDir := filepath.Join(root, strings.TrimPrefix(digest, "sha256:"))
-	manifestPath := filepath.Join(cacheDir, "orun.yaml")
-	if _, err := os.Stat(manifestPath); err == nil {
+	// Check for either manifest filename as a cache-hit indicator.
+	if _, err := os.Stat(filepath.Join(cacheDir, "stack.yaml")); err == nil {
+		return cacheDir, nil
+	}
+	if _, err := os.Stat(filepath.Join(cacheDir, "orun.yaml")); err == nil {
 		return cacheDir, nil
 	}
 
@@ -1003,7 +1026,17 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 	defer os.RemoveAll(tempDir)
 
 	outputDir := tempDir + string(filepath.Separator)
-	cmd := exec.Command("oras", "pull", remoteRef, "-o", outputDir)
+
+	// If the remote is a stack artifact, pull only the compositions layer to avoid
+	// downloading the (potentially large) examples layer.
+	isStack, checkErr := ociArtifactIsStack(remoteRef)
+	var cmd *exec.Cmd
+	if checkErr == nil && isStack {
+		cmd = exec.Command("oras", "pull", remoteRef, "-o", outputDir,
+			"--media-type", compositionsLayerMediaType)
+	} else {
+		cmd = exec.Command("oras", "pull", remoteRef, "-o", outputDir)
+	}
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("oras pull failed: %w\n%s", err, strings.TrimSpace(string(output)))
@@ -1016,6 +1049,17 @@ func ensureCachedOCI(remoteRef, digest string) (string, error) {
 		return "", err
 	}
 	return cacheDir, nil
+}
+
+// ociArtifactIsStack fetches the OCI manifest and returns true when at least one layer
+// carries the stack compositions media type, meaning selective layer pull is safe.
+func ociArtifactIsStack(remoteRef string) (bool, error) {
+	cmd := exec.Command("oras", "manifest", "fetch", remoteRef, "--format", "json")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return false, fmt.Errorf("oras manifest fetch failed: %w", err)
+	}
+	return strings.Contains(string(output), compositionsLayerMediaType), nil
 }
 
 func resolveOCIDigest(remoteRef string) (string, error) {

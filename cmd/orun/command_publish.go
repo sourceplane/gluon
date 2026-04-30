@@ -154,7 +154,9 @@ func printPublishHeader(plan *compositionpkg.PublishPlan) {
 	fmt.Printf("  version    %s\n", plan.Version)
 	fmt.Printf("  files      %d\n", plan.FileCount)
 	fmt.Printf("  registry   %s/%s\n", plan.Registry, plan.Repository)
-	if plan.InferredFromGit {
+	if plan.InferredFromStack {
+		fmt.Println("  source     inferred from stack.yaml registry block")
+	} else if plan.InferredFromGit {
 		fmt.Println("  source     inferred from git remote")
 	}
 }
@@ -172,8 +174,14 @@ func defaultPackageRoot(explicit string) string {
 	if strings.TrimSpace(explicit) != "" {
 		return explicit
 	}
+	if _, err := os.Stat("stack.yaml"); err == nil {
+		return "."
+	}
 	if _, err := os.Stat("orun.yaml"); err == nil {
 		return "."
+	}
+	if _, err := os.Stat(filepath.Join("examples", "compositions", "stack.yaml")); err == nil {
+		return filepath.Join("examples", "compositions")
 	}
 	if _, err := os.Stat(filepath.Join("examples", "compositions", "orun.yaml")); err == nil {
 		return filepath.Join("examples", "compositions")

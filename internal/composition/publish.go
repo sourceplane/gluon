@@ -15,16 +15,17 @@ import (
 
 // PublishPlan captures a fully-resolved publish target before any side-effecting work.
 type PublishPlan struct {
-	PackageRoot      string
-	PackageName      string
-	Version          string
-	OCIRef           string
-	Registry         string
-	Repository       string
-	FileCount        int
-	InferredFromGit  bool
-	InferredVersion  bool
-	ManifestVersion  string
+	PackageRoot       string
+	PackageName       string
+	Version           string
+	OCIRef            string
+	Registry          string
+	Repository        string
+	FileCount         int
+	InferredFromGit   bool
+	InferredFromStack bool
+	InferredVersion   bool
+	ManifestVersion   string
 }
 
 // FullRef returns the canonical <registry>/<repo>:<tag> form.
@@ -56,7 +57,8 @@ func ResolvePackPlan(packageRoot, versionOverride string) (*PublishPlan, error) 
 }
 
 // ResolvePublishPlan inspects packageRoot, optional explicit target, and the local git repo to assemble a PublishPlan.
-// targetRef may be empty (then inferred from git remote), a registry-only host (ghcr.io), or a full <reg>/<repo>[:tag].
+// targetRef may be empty (then inferred from stack.yaml registry or git remote), a registry-only host (ghcr.io),
+// or a full <reg>/<repo>[:tag].
 // versionOverride wins when non-empty.
 func ResolvePublishPlan(packageRoot, targetRef, versionOverride string) (*PublishPlan, error) {
 	plan, err := ResolvePackPlan(packageRoot, versionOverride)
@@ -64,14 +66,15 @@ func ResolvePublishPlan(packageRoot, targetRef, versionOverride string) (*Publis
 		return nil, err
 	}
 
-	registry, repository, tag, err := resolveOCITarget(targetRef, plan.PackageRoot, plan.PackageName, plan.Version)
+	registry, repository, tag, fromGit, fromStack, err := resolveOCITarget(targetRef, plan.PackageRoot, plan.PackageName, plan.Version)
 	if err != nil {
 		return nil, err
 	}
 	plan.Registry = registry
 	plan.Repository = repository
 	plan.OCIRef = fmt.Sprintf("%s/%s:%s", registry, repository, tag)
-	plan.InferredFromGit = strings.TrimSpace(targetRef) == "" || isRegistryOnly(targetRef)
+	plan.InferredFromGit = fromGit
+	plan.InferredFromStack = fromStack
 	return plan, nil
 }
 
@@ -97,14 +100,25 @@ func resolvePackageRoot(packageRoot string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to resolve package root: %w", err)
 	}
-	manifestPath := filepath.Join(abs, "orun.yaml")
-	if _, err := os.Stat(manifestPath); err != nil {
-		return "", fmt.Errorf("no orun.yaml found at %s (use --root to point at a composition package directory)", abs)
+	if _, err := os.Stat(filepath.Join(abs, "stack.yaml")); err == nil {
+		return abs, nil
 	}
-	return abs, nil
+	if _, err := os.Stat(filepath.Join(abs, "orun.yaml")); err == nil {
+		return abs, nil
+	}
+	return "", fmt.Errorf("no stack.yaml or orun.yaml found at %s (use --root to point at a composition package directory)", abs)
 }
 
 func readPackageManifest(root string) (*model.CompositionPackage, error) {
+	// Try stack.yaml (new format) first.
+	if data, err := os.ReadFile(filepath.Join(root, "stack.yaml")); err == nil {
+		pkg, convErr := stackYAMLToCompositionPackage(data)
+		if convErr != nil {
+			return nil, fmt.Errorf("failed to parse stack.yaml at %s: %w", root, convErr)
+		}
+		return pkg, nil
+	}
+	// Fall back to orun.yaml (legacy format).
 	data, err := os.ReadFile(filepath.Join(root, "orun.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read orun.yaml: %w", err)
@@ -122,32 +136,106 @@ func readPackageManifest(root string) (*model.CompositionPackage, error) {
 	return &manifest, nil
 }
 
-func resolveOCITarget(targetRef, root, packageName, version string) (registry, repository, tag string, err error) {
+func resolveOCITarget(targetRef, root, packageName, version string) (registry, repository, tag string, inferredFromGit, inferredFromStack bool, err error) {
 	target := strings.TrimSpace(targetRef)
 	target = strings.TrimPrefix(target, "oci://")
 
 	if target == "" || isRegistryOnly(target) {
+		// Check if stack.yaml has an explicit registry block.
+		if stackRef := readStackRegistryRef(root); stackRef != "" {
+			parts := strings.SplitN(stackRef, "/", 2)
+			if len(parts) == 2 {
+				registry = parts[0]
+				repository = strings.ToLower(parts[1])
+				tag = sanitizeTag(version)
+				return registry, repository, tag, false, true, nil
+			}
+		}
+		// Fall back to inferring from git remote.
 		owner, repo, found := inferGitRepo(root)
 		if !found {
-			return "", "", "", fmt.Errorf("could not infer publish target from git remote; pass an explicit ref like ghcr.io/<owner>/<repo>")
+			return "", "", "", false, false, fmt.Errorf("could not infer publish target from git remote; pass an explicit ref like ghcr.io/<owner>/<repo>")
 		}
-		registry = "ghcr.io"
+		reg := "ghcr.io"
 		if target != "" {
-			registry = trimSlash(target)
+			reg = trimSlash(target)
 		}
 		repository = strings.ToLower(owner + "/" + repo + "/" + packageName)
 		tag = sanitizeTag(version)
-		return registry, repository, tag, nil
+		return reg, repository, tag, true, false, nil
 	}
 
 	registry, repository, tag = splitRefParts(target)
 	if registry == "" || repository == "" {
-		return "", "", "", fmt.Errorf("invalid OCI ref %q: expected <registry>/<repo>[:tag]", targetRef)
+		return "", "", "", false, false, fmt.Errorf("invalid OCI ref %q: expected <registry>/<repo>[:tag]", targetRef)
 	}
 	if tag == "" {
 		tag = sanitizeTag(version)
 	}
-	return registry, strings.ToLower(repository), tag, nil
+	return registry, strings.ToLower(repository), tag, false, false, nil
+}
+
+// stackYAMLToCompositionPackage parses stack.yaml bytes (kind: Stack) and converts
+// to the internal CompositionPackage representation. The composition name is derived
+// from the parent directory of each path entry (e.g.,
+// "compositions/terraform/job.yaml" → name "terraform").
+func stackYAMLToCompositionPackage(data []byte) (*model.CompositionPackage, error) {
+	var stack model.Stack
+	if err := yaml.Unmarshal(data, &stack); err != nil {
+		return nil, err
+	}
+	if stack.Kind != stackKind {
+		return nil, fmt.Errorf("stack.yaml must have kind %s (found %q)", stackKind, stack.Kind)
+	}
+	if strings.TrimSpace(stack.Metadata.Name) == "" {
+		return nil, fmt.Errorf("stack.yaml must set metadata.name")
+	}
+
+	exports := make([]model.CompositionExport, 0, len(stack.Spec.Compositions))
+	for _, entry := range stack.Spec.Compositions {
+		p := strings.TrimSpace(entry.Path)
+		if p == "" {
+			return nil, fmt.Errorf("stack.yaml has a compositions entry with an empty path")
+		}
+		name := filepath.Base(filepath.Dir(filepath.FromSlash(p)))
+		if name == "" || name == "." {
+			return nil, fmt.Errorf("stack.yaml path %q does not follow the expected compositions/<name>/job.yaml pattern", p)
+		}
+		exports = append(exports, model.CompositionExport{
+			Composition: name,
+			Path:        p,
+		})
+	}
+
+	return &model.CompositionPackage{
+		APIVersion: stack.APIVersion,
+		Kind:       compositionPackageKind,
+		Metadata: model.Metadata{
+			Name:        stack.Metadata.Name,
+			Description: stack.Metadata.Description,
+		},
+		Spec: model.CompositionPackageSpec{
+			Version: stack.Metadata.Version,
+			Exports: exports,
+		},
+	}, nil
+}
+
+// readStackRegistryRef returns the OCI ref encoded in stack.yaml's registry block, or "".
+func readStackRegistryRef(root string) string {
+	data, err := os.ReadFile(filepath.Join(root, "stack.yaml"))
+	if err != nil {
+		return ""
+	}
+	var stack model.Stack
+	if err := yaml.Unmarshal(data, &stack); err != nil {
+		return ""
+	}
+	r := stack.Registry
+	if r.Host == "" || r.Namespace == "" || r.Repository == "" {
+		return ""
+	}
+	return r.Host + "/" + r.Namespace + "/" + r.Repository
 }
 
 func splitRefParts(ref string) (registry, repository, tag string) {

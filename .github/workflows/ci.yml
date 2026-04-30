@@ -63,3 +63,25 @@ jobs:
               --plan "$RUNNER_TEMP/orun-example-smoke-plan.json" \
               --workdir "$GITHUB_WORKSPACE/examples" \
               --gha
+
+      - name: Verify stack OCI packaging
+        uses: sourceplane/kiox-action@v2.1.2
+        with:
+          version: v0.4.3
+          providers: |
+            ${{ github.workspace }}/oci as orun
+          run: |
+            # Verify stack.yaml is the canonical manifest.
+            test -f "$GITHUB_WORKSPACE/examples/compositions/stack.yaml"
+
+            # Pack the stack and verify the archive is non-empty.
+            orun pack \
+              --root "$GITHUB_WORKSPACE/examples/compositions" \
+              --output "$RUNNER_TEMP/example-platform-compositions.tgz"
+            test -s "$RUNNER_TEMP/example-platform-compositions.tgz"
+
+            # Dry-run publish to verify OCI ref resolution from stack.yaml registry block.
+            orun publish \
+              --root "$GITHUB_WORKSPACE/examples/compositions" \
+              --dry-run
+

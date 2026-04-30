@@ -1,0 +1,31 @@
+apiVersion: orun.io/v1
+kind: Stack
+metadata:
+  name: example-platform-compositions
+  title: Example Platform Compositions
+  version: 0.9.2
+  description: Packaged compositions for the embedded example platform repository.
+  owner: sourceplane
+  tags:
+    - terraform
+    - helm
+    - cloudflare
+    - platform
+registry:
+  host: ghcr.io
+  namespace: sourceplane
+  repository: example-platform-compositions
+  visibility: public
+spec:
+  compositions:
+    - path: compositions/terraform/job.yaml
+    - path: compositions/helm-values/job.yaml
+    - path: compositions/helm-chart/job.yaml
+    - path: compositions/cloudflare-worker-turbo/job.yaml
+    - path: compositions/cloudflare-worker/job.yaml
+    - path: compositions/cloudflare-pages/job.yaml
+    - path: compositions/cloudflare-pages-turbo/job.yaml
+    - path: compositions/cloudflare-pages-terraform/job.yaml
+    - path: compositions/cloudflare-pages-turbo-terraform/job.yaml
+    - path: compositions/turbo-package/job.yaml
+    - path: compositions/workspace/job.yaml
