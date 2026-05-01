@@ -49,30 +49,28 @@ func detectGitHubActions(getenv func(string) string) DetectedRefs {
 
 	switch event {
 	case "pull_request", "pull_request_target":
-		if baseRef != "" && headRef != "" {
-			return DetectedRefs{
-				Provider:  ProviderGitHubActions,
-				EventType: event,
-				Base:      baseRef,
-				Head:      headRef,
-				Reason:    "GitHub Actions " + event + " event",
-				EnvVars:   envVars,
-			}
-		}
 		base := baseRef
 		if base == "" {
 			base = "main"
 		}
-		head := headRef
+		// Use GITHUB_SHA (the merge commit) not GITHUB_HEAD_REF (branch name).
+		// actions/checkout checks out the merge commit as a detached HEAD; the PR
+		// branch name in GITHUB_HEAD_REF has no local ref and git diff/merge-base
+		// fail silently, returning zero changed files.
+		head := sha
 		if head == "" {
-			head = sha
+			head = headRef
+		}
+		reason := "GitHub Actions " + event + " event"
+		if baseRef == "" || sha == "" {
+			reason += " (partial env)"
 		}
 		return DetectedRefs{
 			Provider:  ProviderGitHubActions,
 			EventType: event,
 			Base:      base,
 			Head:      head,
-			Reason:    "GitHub Actions " + event + " event (partial env)",
+			Reason:    reason,
 			EnvVars:   envVars,
 		}
 

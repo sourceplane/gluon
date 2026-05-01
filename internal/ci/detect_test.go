@@ -31,7 +31,7 @@ func TestDetectRefs(t *testing.T) {
 			wantProv:  ProviderGitHubActions,
 			wantEvent: "pull_request",
 			wantBase:  "main",
-			wantHead:  "feat/auto-detect",
+			wantHead:  "abc123",
 		},
 		{
 			name: "GitHub Actions pull_request_target",
@@ -45,7 +45,7 @@ func TestDetectRefs(t *testing.T) {
 			wantProv:  ProviderGitHubActions,
 			wantEvent: "pull_request_target",
 			wantBase:  "develop",
-			wantHead:  "fix/bug",
+			wantHead:  "def456",
 		},
 		{
 			name: "GitHub Actions push",
