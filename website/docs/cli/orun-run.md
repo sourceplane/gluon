@@ -292,7 +292,7 @@ When running with remote state, each step receives:
 
 ### GitHub Actions matrix example
 
-See [`examples/github-actions/remote-state-matrix.yml`](../../examples/github-actions/remote-state-matrix.yml) for a full workflow that:
+See [`examples/github-actions/remote-state-matrix.yml`](https://github.com/sourceplane/orun/blob/main/examples/github-actions/remote-state-matrix.yml) for a full workflow that:
 
 1. Generates a plan and emits the job list as a matrix
 2. Runs each job as a parallel GitHub Actions matrix worker

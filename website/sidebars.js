@@ -52,6 +52,7 @@ const sidebars = {
       items: [
         'examples/review-pull-request',
         'examples/run-github-actions',
+        'examples/remote-state-matrix',
         'examples/run-with-docker',
         'examples/use-with-kiox',
       ],
