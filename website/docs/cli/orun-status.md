@@ -74,5 +74,22 @@ EXECUTION                              STATUS        PLAN                 JOBS  
 | `--all` | List all stored executions |
 | `--detailed` | Include step-level status in the output |
 | `--json` | Output in JSON format |
+| `--watch`, `-w` | Continuously refresh until the run reaches a terminal state |
+| `--interval` | Refresh interval for `--watch` (default `1s`) |
+| `--remote-state` | Fetch status from orun-backend instead of local state |
+| `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
+
+## Remote status
+
+When `--remote-state` is set, `orun status` fetches run and job state from the backend rather than the local `.orun/` store.
+
+```bash
+orun status \
+  --remote-state \
+  --backend-url https://orun-backend.example.com \
+  --exec-id gh-12345678-1-a1b2c3
+```
+
+The same rendering is used for local and remote state.  `--watch` polls the backend until the run reaches a terminal state (completed or failed).  `--json` returns machine-readable output.
 
 Use `orun describe run <id>` for a fuller breakdown including metadata, timing, and job-level errors.

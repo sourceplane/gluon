@@ -13,6 +13,9 @@ title: Environment variables
 | `ORUN_EXEC_ID` | Execution ID injected into `orun run`; useful in CI for stable cross-job traceability |
 | `ORUN_PLAN_ID` | Plan reference injected into `orun run`; overrides the default `latest` resolution |
 | `ORUN_NO_COLOR` | Disable ANSI color output (any non-empty value) |
+| `ORUN_REMOTE_STATE` | Set to `true` to enable remote state coordination via orun-backend |
+| `ORUN_BACKEND_URL` | URL of the orun-backend instance (required when `ORUN_REMOTE_STATE=true`) |
+| `ORUN_TOKEN` | Static API token for authenticating against orun-backend (fallback to OIDC in GitHub Actions) |
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 
@@ -24,6 +27,9 @@ title: Environment variables
 | --- | --- |
 | `ORUN_CONTEXT` | Runtime environment label such as `local`, `container`, or `ci` |
 | `ORUN_RUNNER` | Resolved runner name for the current step |
+| `ORUN_PLAN_ID` | Plan checksum short-hash (injected into every step environment) |
+| `ORUN_JOB_ID` | Job ID of the currently running job (e.g. `api@dev.deploy`) |
+| `ORUN_JOB_RUN_ID` | Stable cross-job identifier: `{planID}:{execID}:{jobID}` |
 
 ## GitHub Actions compatibility mode
 

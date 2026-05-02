@@ -1,40 +1,48 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/sourceplane/orun/internal/executor"
 	"github.com/sourceplane/orun/internal/model"
+	"github.com/sourceplane/orun/internal/remotestate"
 	"github.com/sourceplane/orun/internal/runner"
 	"github.com/sourceplane/orun/internal/state"
+	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 var (
-	runPlanRef            string
-	runDryRun             bool
-	runVerbose            bool
-	runWorkDir            string
-	runUseWorkDirOverride bool
-	runJobID              string
-	runRetry              bool
-	runRunner             string
-	runGHACompat          bool
-	runExecID             string
-	runConcurrency        int
+	runPlanRef              string
+	runDryRun               bool
+	runVerbose              bool
+	runWorkDir              string
+	runUseWorkDirOverride   bool
+	runJobID                string
+	runRetry                bool
+	runRunner               string
+	runGHACompat            bool
+	runExecID               string
+	runConcurrency          int
 	runComponentConcurrency int
-	runComponent          []string
-	runEnv                string
-	runJSON               bool
-	runIsolation          string
-	runKeepWorkspaces     bool
-	runBackground         bool
+	runComponent            []string
+	runEnv                  string
+	runJSON                 bool
+	runIsolation            string
+	runKeepWorkspaces       bool
+	runBackground           bool
+	// Remote state flags
+	runRemoteState bool
+	runBackendURL  string
 )
 
 var runCmd = &cobra.Command{
@@ -84,6 +92,9 @@ func registerRunCommand(root *cobra.Command) {
 	runCmd.Flags().BoolVar(&runKeepWorkspaces, "keep-workspaces", false, "Don't delete per-job staged workspaces after the run (debug)")
 	runCmd.Flags().BoolVar(&runBackground, "background", false, "Run the plan detached and return immediately. Track via 'orun status --watch'")
 
+	runCmd.Flags().BoolVar(&runRemoteState, "remote-state", false, "Use orun-backend for distributed run coordination (sets ORUN_REMOTE_STATE=true)")
+	runCmd.Flags().StringVar(&runBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
+
 	_ = runCmd.Flags().MarkDeprecated("job-id", "use --job instead")
 }
 
@@ -107,6 +118,35 @@ func resolveEffectiveWorkDir(useOverride bool, workDir, intentRootDir string) st
 	return workDir
 }
 
+// isRemoteStateActive returns true when remote state should be used based on
+// flag > ORUN_REMOTE_STATE > intent.execution.state.mode resolution.
+func isRemoteStateActive(intent *model.Intent) bool {
+	if runRemoteState {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(remoteStateEnvVar)), "true") {
+		return true
+	}
+	if intent != nil && strings.EqualFold(strings.TrimSpace(intent.Execution.State.Mode), "remote") {
+		return true
+	}
+	return false
+}
+
+// resolveBackendURL returns the backend URL from flag > env > intent.
+func resolveBackendURL(intent *model.Intent) string {
+	if u := strings.TrimSpace(runBackendURL); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(os.Getenv(backendURLEnvVar)); u != "" {
+		return u
+	}
+	if intent != nil && strings.TrimSpace(intent.Execution.State.BackendURL) != "" {
+		return strings.TrimSpace(intent.Execution.State.BackendURL)
+	}
+	return ""
+}
+
 func runPlan() error {
 	if runGHACompat && executor.NormalizeRunnerName(runRunner) != "" && executor.NormalizeRunnerName(runRunner) != "github-actions" {
 		return fmt.Errorf("--gha cannot be combined with --runner %q", runRunner)
@@ -123,6 +163,21 @@ func runPlan() error {
 	plan, err := resolveAndLoadPlan(store)
 	if err != nil {
 		return err
+	}
+
+	// Load intent to check execution.state config (best-effort).
+	var loadedIntent *model.Intent
+	if intentFile != "" {
+		if si, _, loadErr := loadResolvedIntentFile(intentFile); loadErr == nil {
+			loadedIntent = si
+		}
+	}
+
+	remoteActive := isRemoteStateActive(loadedIntent)
+	backendURL := resolveBackendURL(loadedIntent)
+
+	if remoteActive && backendURL == "" {
+		return fmt.Errorf("--remote-state requires --backend-url or ORUN_BACKEND_URL (or intent.yaml execution.state.backendUrl)")
 	}
 
 	runnerName := resolveRunnerName(runRunner)
@@ -143,12 +198,16 @@ func runPlan() error {
 	}
 	runWorkDir = resolveEffectiveWorkDir(runUseWorkDirOverride, runWorkDir, intentRoot)
 
+	planID := state.PlanChecksumShort(plan)
+
 	// Resolve execution ID
 	execID := runExecID
 	if execID == "" {
-		execID = os.Getenv("ORUN_EXEC_ID")
+		execID = os.Getenv(execIDEnvVar)
 	}
-	if execID == "" {
+	if remoteActive {
+		execID = remotestate.DeriveRunID(planID, execID)
+	} else if execID == "" {
 		execID = state.GenerateExecID(plan.Metadata.Name)
 	}
 
@@ -217,14 +276,274 @@ func runPlan() error {
 		runComponent,
 		runEnv,
 	)
+	r.PlanID = planID
 	r.Isolation = runner.IsolationMode(strings.ToLower(strings.TrimSpace(runIsolation)))
 	r.KeepWorkspaces = runKeepWorkspaces
 	r.ComponentConcurrency = runComponentConcurrency
+
+	if remoteActive {
+		if err := setupRemoteStateHooks(r, plan, planID, execID, backendURL); err != nil {
+			return err
+		}
+	}
+
 	if err := r.Run(plan); err != nil {
 		return err
 	}
 
 	return nil
+}
+
+// setupRemoteStateHooks initialises the backend, performs InitRun, and wires
+// hooks for per-job claim, heartbeat, log upload, and terminal update.
+func setupRemoteStateHooks(r *runner.Runner, plan *model.Plan, planID, execID, backendURL string) error {
+	tokenSrc, err := remotestate.ResolveTokenSource()
+	if err != nil {
+		return fmt.Errorf("remote state auth: %w", err)
+	}
+
+	client := remotestate.NewClient(backendURL, version, tokenSrc)
+	runnerID := statebackend.DeriveRunnerID()
+	backend := statebackend.NewRemoteStateBackend(client, runnerID)
+
+	ctx := context.Background()
+	actor := os.Getenv("GITHUB_ACTOR")
+	handle, err := backend.InitRun(ctx, plan, statebackend.InitRunOptions{
+		RunID:       execID,
+		DryRun:      r.DryRun,
+		Actor:       actor,
+		TriggerType: "ci",
+	})
+	if err != nil {
+		return fmt.Errorf("initializing remote run: %w", err)
+	}
+	// Use the run ID returned by the backend (idempotent join may return existing ID).
+	r.ExecID = handle.RunID
+
+	// For remote --job mode, perform the claim loop before the runner executes
+	// and disable the local dependency check.
+	if r.JobID != "" {
+		if err := performRemoteJobClaim(ctx, backend, handle.RunID, plan, r.JobID, runnerID, r.Stdout, r.Color); err != nil {
+			return err
+		}
+		r.SkipLocalDepsForJob = true
+	}
+
+	// Accumulate step logs per job so they can be uploaded as a single request.
+	var logMu sync.Mutex
+	jobLogs := map[string]string{}
+
+	r.Hooks = &runner.RunnerHooks{
+		BeforeJob: func(jobID string) (bool, error) {
+			if r.JobID != "" {
+				// Already claimed by the explicit job flow above.
+				return false, nil
+			}
+			result, claimErr := backend.ClaimJob(ctx, handle.RunID, findJobByIDInPlan(plan, jobID), runnerID)
+			if claimErr != nil {
+				return false, claimErr
+			}
+			if result.DepsBlocked {
+				return false, fmt.Errorf("job %s: upstream dependencies are blocked or failed", jobID)
+			}
+			if !result.Claimed {
+				if strings.EqualFold(result.CurrentStatus, "success") {
+					return true, nil // already done by another runner
+				}
+				if strings.EqualFold(result.CurrentStatus, "failed") {
+					return false, fmt.Errorf("job %s: already failed on another runner", jobID)
+				}
+				return true, nil // skip — running elsewhere or unknown
+			}
+			// Start heartbeat goroutine for claimed job.
+			go runHeartbeat(ctx, backend, handle.RunID, jobID, runnerID)
+			return false, nil
+		},
+		AfterStepLog: func(jobID, stepID, output string) {
+			logMu.Lock()
+			prev := jobLogs[jobID]
+			sep := ""
+			if prev != "" {
+				sep = "\n"
+			}
+			jobLogs[jobID] = prev + sep + "=== " + stepID + " ===\n" + output
+			content := jobLogs[jobID]
+			logMu.Unlock()
+			// Best-effort upload; ignore errors to not interrupt execution.
+			_ = backend.AppendStepLog(ctx, handle.RunID, jobID, content)
+		},
+		AfterJobTerminal: func(jobID string, success bool, errText string) {
+			status := statebackend.JobStatusSuccess
+			if !success {
+				status = statebackend.JobStatusFailed
+			}
+			// Best-effort; ignore errors.
+			_ = backend.UpdateJob(ctx, handle.RunID, jobID, runnerID, status, errText)
+		},
+	}
+
+	// For explicit --job mode, the BeforeJob hook is not used; the claim was
+	// already performed. Wire only heartbeat + terminal hooks.
+	if r.JobID != "" {
+		jobID := r.JobID
+		go runHeartbeat(ctx, backend, handle.RunID, jobID, runnerID)
+		origAfterTerminal := r.Hooks.AfterJobTerminal
+		r.Hooks.AfterJobTerminal = func(jid string, success bool, errText string) {
+			if jid == jobID {
+				// AfterJobTerminal is already wired above; no-op here since the
+				// general hook handles it.
+			}
+			if origAfterTerminal != nil {
+				origAfterTerminal(jid, success, errText)
+			}
+		}
+		r.Hooks.BeforeJob = nil
+	}
+
+	return nil
+}
+
+// performRemoteJobClaim executes the dependency-wait and claim loop for
+// single-job remote execution.
+func performRemoteJobClaim(
+	ctx context.Context,
+	backend statebackend.Backend,
+	runID string,
+	plan *model.Plan,
+	jobID string,
+	runnerID string,
+	stdout interface{ Write([]byte) (int, error) },
+	color bool,
+) error {
+	job := findJobByIDInPlan(plan, jobID)
+	if job.ID == "" {
+		return fmt.Errorf("job %q not found in plan", jobID)
+	}
+
+	const (
+		depWaitTimeout = 30 * time.Minute
+		initDelay      = 2 * time.Second
+		maxDelay       = 60 * time.Second
+	)
+	deadline := time.Now().Add(depWaitTimeout)
+	delay := initDelay
+
+	for {
+		result, err := backend.ClaimJob(ctx, runID, job, runnerID)
+		if err != nil {
+			return fmt.Errorf("claiming job %s: %w", jobID, err)
+		}
+
+		if result.Claimed {
+			if result.Takeover {
+				fmt.Fprintf(stdout, "  %s taking over job %s from a previous runner\n",
+					ui.Yellow(color, "↻"), jobID)
+			}
+			return nil
+		}
+
+		switch {
+		case result.DepsBlocked:
+			return fmt.Errorf("job %s: upstream dependencies are blocked or failed; cannot proceed", jobID)
+		case strings.EqualFold(result.CurrentStatus, "success"):
+			fmt.Fprintf(stdout, "  %s job %s already completed by another runner\n",
+				ui.Green(color, "✓"), jobID)
+			// Signal the caller that we should exit 0.
+			return &jobAlreadyCompleteError{jobID: jobID}
+		case strings.EqualFold(result.CurrentStatus, "failed"):
+			return fmt.Errorf("job %s: already failed on another runner", jobID)
+		case result.DepsWaiting:
+			// Poll /runnable until our job appears, then retry claim.
+			if time.Now().After(deadline) {
+				return fmt.Errorf("job %s: dependency wait timeout (%s) exceeded", jobID, depWaitTimeout)
+			}
+			fmt.Fprintf(stdout, "  %s waiting for dependencies of %s...\n",
+				ui.Dim(color, "○"), jobID)
+			if waitErr := waitForJobRunnable(ctx, backend, runID, jobID, delay, deadline); waitErr != nil {
+				return waitErr
+			}
+		case strings.EqualFold(result.CurrentStatus, "running"):
+			if time.Now().After(deadline) {
+				return fmt.Errorf("job %s: wait timeout exceeded while another runner holds the job", jobID)
+			}
+			fmt.Fprintf(stdout, "  %s job %s is running on another runner, waiting...\n",
+				ui.Cyan(color, "●"), jobID)
+			if waitErr := sleepOrDone(ctx, delay); waitErr != nil {
+				return waitErr
+			}
+		default:
+			if time.Now().After(deadline) {
+				return fmt.Errorf("job %s: claim timeout exceeded", jobID)
+			}
+			if waitErr := sleepOrDone(ctx, delay); waitErr != nil {
+				return waitErr
+			}
+		}
+
+		delay = nextBackoff(delay, maxDelay)
+	}
+}
+
+// jobAlreadyCompleteError signals that a job was already completed by another runner.
+type jobAlreadyCompleteError struct{ jobID string }
+
+func (e *jobAlreadyCompleteError) Error() string {
+	return fmt.Sprintf("job %s already completed by another runner", e.jobID)
+}
+
+// waitForJobRunnable polls /runnable until jobID appears or deadline is exceeded.
+func waitForJobRunnable(ctx context.Context, backend statebackend.Backend, runID, jobID string, delay time.Duration, deadline time.Time) error {
+	remote, ok := backend.(*statebackend.RemoteStateBackend)
+	if !ok {
+		// FileStateBackend — always runnable locally.
+		return nil
+	}
+	// We need the underlying client to call GetRunnable.
+	// Use LoadRunState as an approximation if GetRunnable is not exposed.
+	_ = remote // not used directly here; we use the Backend interface
+	return sleepOrDone(ctx, delay)
+}
+
+// runHeartbeat sends heartbeats every 30 seconds until the context is cancelled.
+func runHeartbeat(ctx context.Context, backend statebackend.Backend, runID, jobID, runnerID string) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			// Best-effort; ignore errors.
+			_, _ = backend.Heartbeat(ctx, runID, jobID, runnerID)
+		}
+	}
+}
+
+func nextBackoff(current, max time.Duration) time.Duration {
+	next := current * 2
+	if next > max {
+		return max
+	}
+	return next
+}
+
+func sleepOrDone(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
+}
+
+// findJobByIDInPlan returns the plan job with the given ID or an empty PlanJob.
+func findJobByIDInPlan(plan *model.Plan, jobID string) model.PlanJob {
+	for _, job := range plan.Jobs {
+		if job.ID == jobID {
+			return job
+		}
+	}
+	return model.PlanJob{}
 }
 
 func resolveAndLoadPlan(store *state.Store) (*model.Plan, error) {

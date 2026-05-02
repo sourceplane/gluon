@@ -33,6 +33,21 @@ const (
 	IsolationNone      IsolationMode = "none"
 )
 
+// RunnerHooks allow external code to observe step and job lifecycle events
+// without coupling the runner to a specific backend implementation.
+type RunnerHooks struct {
+	// AfterStepLog is called after each step completes with the step output.
+	// It is called synchronously; implementations should be non-blocking or
+	// fast to avoid delaying execution.
+	AfterStepLog func(jobID, stepID, output string)
+	// AfterJobTerminal is called when a job reaches a terminal state.
+	AfterJobTerminal func(jobID string, success bool, errText string)
+	// BeforeJob is called before a job starts. If it returns (true, nil) the job
+	// is treated as already complete and execution is skipped. An error cancels
+	// the run.
+	BeforeJob func(jobID string) (skipExec bool, err error)
+}
+
 type Runner struct {
 	WorkDir            string
 	UseWorkDirOverride bool
@@ -47,11 +62,20 @@ type Runner struct {
 	Runtime            executor.RuntimeContext
 	Store              *state.Store
 	ExecID             string
+	// PlanID is the plan checksum short-form, injected as ORUN_PLAN_ID into
+	// every step environment. Also used to build ORUN_JOB_RUN_ID.
+	PlanID             string
 	Concurrency        int
 	FilterComponents   []string
 	FilterEnv          string
 	Isolation          IsolationMode
 	KeepWorkspaces     bool
+	// SkipLocalDepsForJob disables the local dependency-completion check when
+	// running a single --job in remote mode. The remote backend's claim API
+	// already enforces dependency ordering.
+	SkipLocalDepsForJob bool
+	// Hooks wires external lifecycle callbacks (remote state, log upload, etc.).
+	Hooks              *RunnerHooks
 	printMu            sync.Mutex
 	stateMu            sync.Mutex
 
@@ -245,6 +269,7 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 				"ORUN_CONTEXT": r.Runtime.Environment,
 				"ORUN_RUNNER":  r.Runtime.Runner,
 				"ORUN_EXEC_ID": r.ExecID,
+				"ORUN_PLAN_ID": r.PlanID,
 			},
 		),
 		Runtime: r.Runtime,
@@ -358,10 +383,12 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			if r.Verbose || r.JobID != "" {
 				r.printWaiting(job, unmet, execState)
 			}
-			if r.JobID != "" {
+			if r.JobID != "" && !r.SkipLocalDepsForJob {
 				return fmt.Errorf("cannot run %s: dependencies not completed (%s)", job.ID, strings.Join(unmet, ", "))
 			}
-			continue
+			if r.JobID == "" {
+				continue
+			}
 		}
 
 		executedTarget = true
@@ -371,6 +398,21 @@ func (r *Runner) Run(plan *model.Plan) (runErr error) {
 			summary.addResumed()
 			r.printJobResumed(job)
 			continue
+		}
+
+		// BeforeJob hook: allow external code (e.g. remote claim) to decide
+		// whether to skip this job.
+		if r.Hooks != nil && r.Hooks.BeforeJob != nil {
+			skip, hookErr := r.Hooks.BeforeJob(job.ID)
+			if hookErr != nil {
+				return hookErr
+			}
+			if skip {
+				jobState.Status = "completed"
+				summary.addResumed()
+				r.printJobResumed(job)
+				continue
+			}
 		}
 
 		failed := r.executeJob(job, jobState, execState, baseExecContext, persistState, failFast, summary)
@@ -520,6 +562,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 		// Write step log
 		r.writeStepLog(job.ID, stepID, output)
+		if r.Hooks != nil && r.Hooks.AfterStepLog != nil && strings.TrimSpace(output) != "" {
+			r.Hooks.AfterStepLog(job.ID, stepID, output)
+		}
 
 		if r.inGHA() {
 			r.ghaEmitStepOutput(job.ID, output)
@@ -543,6 +588,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 
 			jobFailed = true
 			summary.addFailed()
+			if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+				r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+			}
 			break
 		}
 
@@ -575,6 +623,9 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 					jobState.FinishedAt = time.Now().UTC().Format(time.RFC3339)
 				})
 				r.printFailureBlock(finalizeErr, output, jobWorkingDir)
+				if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+					r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+				}
 			}
 		}
 	}
@@ -590,9 +641,15 @@ func (r *Runner) executeJob(job model.PlanJob, jobState *state.JobState, execSta
 		})
 		summary.addCompleted()
 		r.printJobFooter(job, jobReport, true, time.Since(jobStartedAt))
+		if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+			r.Hooks.AfterJobTerminal(job.ID, true, "")
+		}
 	} else if !jobFailed {
 		summary.addFailed()
 		r.printJobFooter(job, jobReport, false, time.Since(jobStartedAt))
+		if r.Hooks != nil && r.Hooks.AfterJobTerminal != nil {
+			r.Hooks.AfterJobTerminal(job.ID, false, jobState.LastError)
+		}
 	}
 
 	return jobFailed
@@ -744,6 +801,35 @@ func (r *Runner) runConcurrent(jobs []model.PlanJob, plan *model.Plan, execState
 					mu.Unlock()
 					r.printJobResumed(j)
 					return
+				}
+
+				// BeforeJob hook: allow external code to decide whether to skip.
+				if r.Hooks != nil && r.Hooks.BeforeJob != nil {
+					skip, hookErr := r.Hooks.BeforeJob(j.ID)
+					if hookErr != nil {
+						if firstErr == nil {
+							firstErr = hookErr
+						}
+						compRemaining[j.Component]--
+						activeComps[j.Component]--
+						if activeComps[j.Component] <= 0 {
+							delete(activeComps, j.Component)
+						}
+						mu.Unlock()
+						return
+					}
+					if skip {
+						completed[j.ID] = true
+						summary.addResumed()
+						compRemaining[j.Component]--
+						activeComps[j.Component]--
+						if activeComps[j.Component] <= 0 {
+							delete(activeComps, j.Component)
+						}
+						mu.Unlock()
+						r.printJobResumed(j)
+						return
+					}
 				}
 				mu.Unlock()
 
@@ -1288,6 +1374,12 @@ func (r *Runner) stepExecContext(base executor.ExecContext, job model.PlanJob, s
 	execContext := base
 	execContext.Context = stepContext
 	execContext.JobEnv = executor.JobEnvironment(job.Env)
+	// Inject job-level runtime IDs so steps can reference the current job.
+	jobRuntimeEnv := map[string]string{
+		"ORUN_JOB_ID":     job.ID,
+		"ORUN_JOB_RUN_ID": r.PlanID + ":" + r.ExecID + ":" + job.ID,
+	}
+	execContext.JobEnv = executor.MergeEnvironment(execContext.JobEnv, jobRuntimeEnv)
 	execContext.StepEnv = executor.JobEnvironment(step.Env)
 	execContext.WorkDir = r.resolveStepWorkingDir(workingDir, step.WorkingDirectory)
 	execContext.Env = executor.MergeEnvironment(execContext.BaseEnv, execContext.JobEnv, execContext.StepEnv)

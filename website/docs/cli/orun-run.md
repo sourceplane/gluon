@@ -167,6 +167,8 @@ orun run --changed --explain
 | `--isolation` | Per-job workspace isolation: `auto` (on when concurrency > 1), `workspace` (always on), or `none` (legacy shared tree). Default: `auto` |
 | `--keep-workspaces` | Preserve per-job staged workspaces after the run for debugging |
 | `--background` | Run the plan detached and return immediately. Track progress with `orun status --watch` |
+| `--remote-state` | Use orun-backend for distributed run coordination (enables remote state) |
+| `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
 
 ### Plan selection flags
 
@@ -244,3 +246,54 @@ warning: plan was generated for [api, common-services] but current scope is [web
 To avoid the mismatch, either regenerate the plan from your current directory or use `--all`.
 
 See [context-aware discovery](../concepts/context-discovery.md) for full details on auto-scoping behavior.
+
+## Remote state (distributed execution)
+
+`orun run --remote-state` delegates execution coordination to an [orun-backend](https://github.com/sourceplane/orun-backend) instance.  Each GitHub Actions matrix job runs `orun run --remote-state --job <id>`, and the backend enforces DAG ordering — a job polls until its dependencies complete before claiming work.
+
+### Enabling remote state
+
+Three equivalent ways, in priority order:
+
+1. **Flag**: `--remote-state --backend-url https://…`
+2. **Environment**: `ORUN_REMOTE_STATE=true ORUN_BACKEND_URL=https://…`
+3. **intent.yaml**:
+   ```yaml
+   execution:
+     state:
+       mode: remote
+       backendUrl: https://orun-backend.example.com
+   ```
+
+### Authentication
+
+Remote state mutations (claim, heartbeat, update, log upload) require a bearer token.  Two sources are tried in order:
+
+1. **GitHub Actions OIDC** — when `GITHUB_ACTIONS=true` and the OIDC token endpoint vars are set, an OIDC token with audience `orun` is fetched automatically.
+2. **`ORUN_TOKEN`** — a static API token you can set in secrets.
+
+### Run ID derivation
+
+The run ID is derived in this order:
+
+1. `--exec-id` or `ORUN_EXEC_ID` (explicit)
+2. `gh-{GITHUB_RUN_ID}-{GITHUB_RUN_ATTEMPT}-{planChecksum}` (inside GHA)
+3. `local-{planChecksum}-{randomHex}` (fallback)
+
+### Step environment variables
+
+When running with remote state, each step receives:
+
+| Variable | Value |
+| --- | --- |
+| `ORUN_PLAN_ID` | Plan checksum short-hash |
+| `ORUN_JOB_ID` | Job ID (e.g. `api@dev.deploy`) |
+| `ORUN_JOB_RUN_ID` | `{planID}:{execID}:{jobID}` — stable cross-job identifier |
+
+### GitHub Actions matrix example
+
+See [`examples/github-actions/remote-state-matrix.yml`](../../examples/github-actions/remote-state-matrix.yml) for a full workflow that:
+
+1. Generates a plan and emits the job list as a matrix
+2. Runs each job as a parallel GitHub Actions matrix worker
+3. Uses the backend to enforce DAG ordering

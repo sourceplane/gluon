@@ -60,7 +60,27 @@ orun logs job/<job-id>
 | `--exec-id` | Target a specific execution (defaults to `latest`) |
 | `--job` | Filter output to a specific job ID |
 | `--step` | Filter output to a specific step ID within the selected job |
+| `--failed` | Show only failed jobs or steps |
+| `--raw` | Show full raw logs instead of compact 8-line excerpts |
+| `--remote-state` | Fetch logs from orun-backend instead of local state |
+| `--backend-url` | orun-backend URL for remote state (or set `ORUN_BACKEND_URL`) |
+
+## Remote logs
+
+When `--remote-state` is set, `orun logs` fetches job logs from the backend:
+
+```bash
+orun logs \
+  --remote-state \
+  --backend-url https://orun-backend.example.com \
+  --exec-id gh-12345678-1-a1b2c3 \
+  --job api@dev.deploy
+```
+
+Omit `--job` to fetch logs for all jobs in the run.
 
 ## Log storage
 
-Logs are written to `.orun/executions/{exec-id}/logs/{job}/{step}.log` during execution. Each step's raw output is stored separately, making it easy to diff, archive, or forward logs from individual steps.
+Logs are written to `.orun/executions/{exec-id}/logs/{job}/{step}.log` during local execution. Each step's raw output is stored separately, making it easy to diff, archive, or forward logs from individual steps.
+
+When running with `--remote-state`, logs are streamed to the backend during execution and retrieved via the backend API.

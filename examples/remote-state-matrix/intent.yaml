@@ -1,0 +1,59 @@
+apiVersion: sourceplane.io/v1
+kind: Intent
+metadata:
+  name: remote-state-matrix-demo
+  description: |
+    Demonstrates distributed GitHub Actions matrix execution via orun-backend remote state.
+    A DAG of three components (foundation → api, web) runs across dev and stage environments.
+
+execution:
+  state:
+    mode: remote
+    backendUrl: https://orun-backend.example.com
+
+environments:
+  dev:
+    defaults:
+      cluster: dev-eks
+  stage:
+    selectors:
+      components:
+        - foundation
+        - api
+        - web
+    defaults:
+      cluster: stage-eks
+
+components:
+  - name: foundation
+    type: terraform
+    subscribe:
+      environments:
+        - dev
+        - stage
+    inputs:
+      module: infra/foundation
+
+  - name: api
+    type: helm
+    subscribe:
+      environments:
+        - dev
+        - stage
+    inputs:
+      chart: charts/api
+    dependsOn:
+      - component: foundation
+        condition: success
+
+  - name: web
+    type: helm
+    subscribe:
+      environments:
+        - dev
+        - stage
+    inputs:
+      chart: charts/web
+    dependsOn:
+      - component: foundation
+        condition: success

@@ -10,6 +10,20 @@ type Intent struct {
 	Groups       map[string]Group       `yaml:"groups" json:"groups"`
 	Environments map[string]Environment `yaml:"environments" json:"environments"`
 	Components   []Component            `yaml:"components" json:"components"`
+	Execution    IntentExecution        `yaml:"execution,omitempty" json:"execution,omitempty"`
+}
+
+// IntentExecution holds optional execution-layer configuration in intent.yaml.
+type IntentExecution struct {
+	State IntentExecutionState `yaml:"state,omitempty" json:"state,omitempty"`
+}
+
+// IntentExecutionState configures where execution state is stored.
+type IntentExecutionState struct {
+	// Mode is "local" (default) or "remote".
+	Mode       string `yaml:"mode,omitempty" json:"mode,omitempty"`
+	// BackendURL is the URL of the orun-backend instance for remote mode.
+	BackendURL string `yaml:"backendUrl,omitempty" json:"backendUrl,omitempty"`
 }
 
 // Discovery limits repository scanning for external component manifests.

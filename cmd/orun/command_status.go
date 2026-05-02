@@ -1,24 +1,29 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var (
-	statusExecID    string
-	statusAll       bool
-	statusDetailed  bool
-	statusJSON      bool
-	statusWatch     bool
-	statusInterval  time.Duration
+	statusExecID      string
+	statusAll         bool
+	statusDetailed    bool
+	statusJSON        bool
+	statusWatch       bool
+	statusInterval    time.Duration
+	statusRemoteState bool
+	statusBackendURL  string
 )
 
 type executionCounts struct {
@@ -47,11 +52,71 @@ func registerStatusCommand(root *cobra.Command) {
 	statusCmd.Flags().BoolVar(&statusJSON, "json", false, "Output in JSON format")
 	statusCmd.Flags().BoolVarP(&statusWatch, "watch", "w", false, "Continuously refresh the status view")
 	statusCmd.Flags().DurationVar(&statusInterval, "interval", time.Second, "Refresh interval when --watch is set")
+	statusCmd.Flags().BoolVar(&statusRemoteState, "remote-state", false, "Fetch status from orun-backend")
+	statusCmd.Flags().StringVar(&statusBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
+}
+
+func isStatusRemoteActive() bool {
+	if statusRemoteState {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(remoteStateEnvVar)), "true") {
+		return true
+	}
+	if intentFile != "" {
+		if si, _, err := loadResolvedIntentFile(intentFile); err == nil {
+			if si != nil && strings.EqualFold(strings.TrimSpace(si.Execution.State.Mode), "remote") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resolveStatusBackendURL() string {
+	if u := strings.TrimSpace(statusBackendURL); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(os.Getenv(backendURLEnvVar)); u != "" {
+		return u
+	}
+	if intentFile != "" {
+		if si, _, err := loadResolvedIntentFile(intentFile); err == nil {
+			if si != nil && strings.TrimSpace(si.Execution.State.BackendURL) != "" {
+				return strings.TrimSpace(si.Execution.State.BackendURL)
+			}
+		}
+	}
+	return ""
 }
 
 func showStatus() error {
-	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
+
+	if isStatusRemoteActive() {
+		backendURL := resolveStatusBackendURL()
+		if backendURL == "" {
+			return fmt.Errorf("--remote-state requires --backend-url or ORUN_BACKEND_URL")
+		}
+		runID := statusExecID
+		if runID == "" {
+			runID = os.Getenv(execIDEnvVar)
+		}
+		if runID == "" {
+			return fmt.Errorf("--remote-state requires --exec-id or ORUN_EXEC_ID")
+		}
+		backend, err := newRemoteBackend(backendURL)
+		if err != nil {
+			return err
+		}
+		defer backend.Close(context.Background())
+		if statusWatch {
+			return watchRemoteExecution(runID, backend, color)
+		}
+		return showRemoteExecution(runID, backend, color)
+	}
+
+	store := state.NewStore(storeDir())
 
 	if statusAll {
 		return showAllExecutions(store, color)
@@ -81,6 +146,62 @@ func showStatus() error {
 	}
 
 	return showExecution(store, execID, color)
+}
+
+func showRemoteExecution(runID string, backend statebackend.Backend, color bool) error {
+	ctx := context.Background()
+	st, meta, err := backend.LoadRunState(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("fetching remote run state: %w", err)
+	}
+	if statusJSON {
+		return renderExecutionJSON(runID, meta, st)
+	}
+	return renderExecution(runID, meta, st, color)
+}
+
+func watchRemoteExecution(runID string, backend statebackend.Backend, color bool) error {
+	interval := statusInterval
+	if interval < 200*time.Millisecond {
+		interval = time.Second
+	}
+	ctx := context.Background()
+	fmt.Print("\x1b[?25l")
+	defer fmt.Print("\x1b[?25h\n")
+
+	for {
+		st, meta, err := backend.LoadRunState(ctx, runID)
+		fmt.Print("\x1b[H\x1b[J")
+		if err != nil {
+			fmt.Println(ui.Dim(color, fmt.Sprintf("Error fetching remote state: %v", err)))
+		} else {
+			if renderErr := renderExecution(runID, meta, st, color); renderErr != nil {
+				return renderErr
+			}
+			if meta != nil {
+				s := strings.ToLower(strings.TrimSpace(meta.Status))
+				if s == "completed" || s == "failed" {
+					return nil
+				}
+			}
+		}
+		time.Sleep(interval)
+	}
+}
+
+func renderExecutionJSON(execID string, meta *state.ExecMetadata, st *state.ExecState) error {
+	out := map[string]interface{}{
+		"execID": execID,
+	}
+	if meta != nil {
+		out["meta"] = meta
+	}
+	if st != nil {
+		out["state"] = st
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func watchExecution(store *state.Store, resolve func() (string, error), color bool) error {
@@ -218,6 +339,13 @@ func collectJobViews(st *state.ExecState) []jobView {
 func showExecution(store *state.Store, execID string, color bool) error {
 	meta, _ := store.LoadMetadata(execID)
 	st, _ := store.LoadState(execID)
+	if statusJSON {
+		return renderExecutionJSON(execID, meta, st)
+	}
+	return renderExecution(execID, meta, st, color)
+}
+
+func renderExecution(execID string, meta *state.ExecMetadata, st *state.ExecState, color bool) error {
 	counts := executionCountsFromState(meta, st)
 
 	status := "unknown"

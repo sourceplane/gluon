@@ -1,0 +1,79 @@
+# remote-state-matrix.yml
+#
+# Runs orun jobs in parallel GitHub Actions matrix workers coordinated through
+# orun-backend remote state.  Dependencies (e.g. api/web only after foundation)
+# are enforced by the backend — each job polls until its deps complete, then
+# claims work and executes.
+#
+# Required secrets / variables:
+#   ORUN_BACKEND_URL  - URL of your orun-backend instance
+#   ORUN_TOKEN        - API token (or rely on OIDC if backend supports it)
+
+name: remote-state-matrix
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+jobs:
+  plan:
+    name: Generate plan
+    runs-on: ubuntu-latest
+    outputs:
+      plan-id: ${{ steps.plan.outputs.plan-id }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install orun
+        run: |
+          curl -sSfL https://get.orun.dev | sh -s -- -b /usr/local/bin
+
+      - name: Generate plan
+        id: plan
+        env:
+          ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+          ORUN_TOKEN: ${{ secrets.ORUN_TOKEN }}
+        run: |
+          orun plan --output plan.json --format json
+          echo "plan-id=$(cat plan.json | jq -r '.metadata.checksum')" >> "$GITHUB_OUTPUT"
+          # Emit matrix: one entry per job ID in the plan
+          MATRIX=$(cat plan.json | jq -c '[.jobs[].id]')
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: orun-plan
+          path: plan.json
+
+  run:
+    name: Run ${{ matrix.job }}
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        job: ${{ fromJson(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install orun
+        run: |
+          curl -sSfL https://get.orun.dev | sh -s -- -b /usr/local/bin
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: orun-plan
+
+      - name: Execute job
+        env:
+          ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+          ORUN_TOKEN: ${{ secrets.ORUN_TOKEN }}
+          ORUN_PLAN_ID: ${{ needs.plan.outputs.plan-id }}
+        run: |
+          orun run \
+            --remote-state \
+            --backend-url "$ORUN_BACKEND_URL" \
+            --plan plan.json \
+            --job "${{ matrix.job }}"

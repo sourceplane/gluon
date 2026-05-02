@@ -1,23 +1,27 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 
+	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/sourceplane/orun/internal/state"
 	"github.com/sourceplane/orun/internal/ui"
 	"github.com/spf13/cobra"
 )
 
 var (
-	logsExecID string
-	logsJob    string
-	logsStep   string
-	logsFailed bool
-	logsRaw    bool
+	logsExecID        string
+	logsJob           string
+	logsStep          string
+	logsFailed        bool
+	logsRaw           bool
+	logsRemoteState   bool
+	logsBackendURL    string
 )
 
 type logEntry struct {
@@ -51,11 +55,68 @@ func registerLogsCommand(root *cobra.Command) {
 	logsCmd.Flags().StringVar(&logsStep, "step", "", "Filter logs by step ID")
 	logsCmd.Flags().BoolVar(&logsFailed, "failed", false, "Show only failed jobs or steps")
 	logsCmd.Flags().BoolVar(&logsRaw, "raw", false, "Show full raw logs instead of compact excerpts")
+	logsCmd.Flags().BoolVar(&logsRemoteState, "remote-state", false, "Fetch logs from orun-backend")
+	logsCmd.Flags().StringVar(&logsBackendURL, "backend-url", "", "orun-backend URL for remote state (or set ORUN_BACKEND_URL)")
+}
+
+func isLogsRemoteActive() bool {
+	if logsRemoteState {
+		return true
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv(remoteStateEnvVar)), "true") {
+		return true
+	}
+	if intentFile != "" {
+		if si, _, err := loadResolvedIntentFile(intentFile); err == nil {
+			if si != nil && strings.EqualFold(strings.TrimSpace(si.Execution.State.Mode), "remote") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func resolveLogsBackendURL() string {
+	if u := strings.TrimSpace(logsBackendURL); u != "" {
+		return u
+	}
+	if u := strings.TrimSpace(os.Getenv(backendURLEnvVar)); u != "" {
+		return u
+	}
+	if intentFile != "" {
+		if si, _, err := loadResolvedIntentFile(intentFile); err == nil {
+			if si != nil && strings.TrimSpace(si.Execution.State.BackendURL) != "" {
+				return strings.TrimSpace(si.Execution.State.BackendURL)
+			}
+		}
+	}
+	return ""
 }
 
 func showLogs() error {
-	store := state.NewStore(storeDir())
 	color := ui.ColorEnabledForWriter(os.Stdout)
+
+	if isLogsRemoteActive() {
+		backendURL := resolveLogsBackendURL()
+		if backendURL == "" {
+			return fmt.Errorf("--remote-state requires --backend-url or ORUN_BACKEND_URL")
+		}
+		runID := logsExecID
+		if runID == "" {
+			runID = os.Getenv(execIDEnvVar)
+		}
+		if runID == "" {
+			return fmt.Errorf("--remote-state requires --exec-id or ORUN_EXEC_ID")
+		}
+		backend, err := newRemoteBackend(backendURL)
+		if err != nil {
+			return err
+		}
+		defer backend.Close(context.Background())
+		return showRemoteLogs(runID, backend, color)
+	}
+
+	store := state.NewStore(storeDir())
 
 	execID := logsExecID
 	if execID == "" {
@@ -106,6 +167,80 @@ func showLogs() error {
 	})
 	entries = selectRelevantLogEntries(entries)
 
+	renderLogEntries(execID, meta, counts, entries, color)
+	return nil
+}
+
+func showRemoteLogs(runID string, backend statebackend.Backend, color bool) error {
+	ctx := context.Background()
+	st, meta, err := backend.LoadRunState(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("fetching remote run state: %w", err)
+	}
+
+	entries, err := collectRemoteLogEntries(ctx, backend, runID, st)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Println(ui.Dim(color, "No logs for this run yet."))
+		return nil
+	}
+
+	sort.Slice(entries, func(i, j int) bool {
+		ci, ei, _ := splitJobID(entries[i].jobID)
+		cj, ej, _ := splitJobID(entries[j].jobID)
+		if ci != cj {
+			return ci < cj
+		}
+		if ei != ej {
+			return ei < ej
+		}
+		oi := statusSortKey(entries[i].status)
+		oj := statusSortKey(entries[j].status)
+		if oi != oj {
+			return oi < oj
+		}
+		return entries[i].jobID < entries[j].jobID
+	})
+	entries = selectRelevantLogEntries(entries)
+
+	counts := executionCountsFromState(meta, st)
+	renderLogEntries(runID, meta, counts, entries, color)
+	return nil
+}
+
+func collectRemoteLogEntries(ctx context.Context, backend statebackend.Backend, runID string, st *state.ExecState) ([]logEntry, error) {
+	if st == nil {
+		return nil, nil
+	}
+	entries := make([]logEntry, 0, len(st.Jobs))
+	for jobID, js := range st.Jobs {
+		if logsJob != "" && !strings.Contains(jobID, logsJob) {
+			continue
+		}
+		content, err := backend.ReadJobLog(ctx, runID, jobID)
+		if err != nil || strings.TrimSpace(content) == "" {
+			continue
+		}
+		status := "completed"
+		if js != nil && js.Status != "" {
+			status = js.Status
+		}
+		if logsFailed && !strings.EqualFold(status, "failed") {
+			continue
+		}
+		entries = append(entries, logEntry{
+			jobID:   jobID,
+			stepID:  "",
+			status:  status,
+			content: strings.TrimSpace(content),
+		})
+	}
+	return entries, nil
+}
+
+func renderLogEntries(execID string, meta *state.ExecMetadata, counts executionCounts, entries []logEntry, color bool) {
 	status := "unknown"
 	duration := ""
 	if meta != nil {
@@ -126,10 +261,6 @@ func showLogs() error {
 
 	if meta != nil {
 		subParts := []string{}
-		planValue := strings.TrimSpace(meta.PlanName)
-		if planValue == "" {
-			planValue = "plan"
-		}
 		if strings.TrimSpace(meta.PlanID) != "" {
 			subParts = append(subParts, "plan "+meta.PlanID)
 		}
@@ -177,8 +308,6 @@ func showLogs() error {
 			}
 		}
 	}
-
-	return nil
 }
 
 func loadLogEntries(store *state.Store, execID string, st *state.ExecState) ([]logEntry, error) {

@@ -85,3 +85,23 @@ Use CLI flags when you want to scope the effective configuration at compile time
 - `--view` for DAG-focused render views
 
 Read [environment variables](./environment-variables.md) if you want to control configuration through the shell.
+
+## Remote state configuration
+
+Add an `execution.state` block to `intent.yaml` to enable remote state coordination via orun-backend:
+
+```yaml
+execution:
+  state:
+    mode: remote
+    backendUrl: https://orun-backend.example.com
+```
+
+| Field | Values | Meaning |
+| --- | --- | --- |
+| `mode` | `local` (default) or `remote` | Where execution state is stored |
+| `backendUrl` | URI | URL of the orun-backend instance (required when `mode: remote`) |
+
+The `backendUrl` can also be supplied via `--backend-url` or `ORUN_BACKEND_URL`; those take priority over the intent file.
+
+When `mode: remote` is set, all three commands that read execution state (`run`, `status`, `logs`) automatically use the backend without requiring `--remote-state` on the command line.

@@ -6,18 +6,24 @@ import (
 	"path/filepath"
 
 	"github.com/sourceplane/orun/internal/discovery"
+	"github.com/sourceplane/orun/internal/remotestate"
+	"github.com/sourceplane/orun/internal/statebackend"
 	"github.com/spf13/cobra"
 )
 
 const (
-	cliName         = "orun"
-	configDirEnvVar = "ORUN_CONFIG_DIR"
-	runnerEnvVar    = "ORUN_RUNNER"
-	execIDEnvVar    = "ORUN_EXEC_ID"
-	planIDEnvVar    = "ORUN_PLAN_ID"
-	noColorEnvVar   = "ORUN_NO_COLOR"
-	dryRunEnvVar    = "ORUN_DRY_RUN"
-	stateDirEnvVar  = "ORUN_STATE_DIR"
+	cliName           = "orun"
+	configDirEnvVar   = "ORUN_CONFIG_DIR"
+	runnerEnvVar      = "ORUN_RUNNER"
+	execIDEnvVar      = "ORUN_EXEC_ID"
+	planIDEnvVar      = "ORUN_PLAN_ID"
+	noColorEnvVar     = "ORUN_NO_COLOR"
+	dryRunEnvVar      = "ORUN_DRY_RUN"
+	stateDirEnvVar    = "ORUN_STATE_DIR"
+	// Remote state env vars
+	remoteStateEnvVar = "ORUN_REMOTE_STATE"
+	backendURLEnvVar  = "ORUN_BACKEND_URL"
+	tokenEnvVar       = "ORUN_TOKEN"
 )
 
 var version = "dev"
@@ -124,6 +130,17 @@ func storeDir() string {
 		return intentRoot
 	}
 	return "."
+}
+
+// newRemoteBackend creates a RemoteStateBackend using the resolved token source.
+func newRemoteBackend(backendURL string) (statebackend.Backend, error) {
+	tokenSrc, err := remotestate.ResolveTokenSource()
+	if err != nil {
+		return nil, fmt.Errorf("remote state auth: %w", err)
+	}
+	client := remotestate.NewClient(backendURL, version, tokenSrc)
+	runnerID := statebackend.DeriveRunnerID()
+	return statebackend.NewRemoteStateBackend(client, runnerID), nil
 }
 
 func commandUsesIntent(cmd *cobra.Command) bool {

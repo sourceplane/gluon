@@ -115,6 +115,26 @@ properties:
         policies:
           type: object
           additionalProperties: true
+  execution:
+    type: object
+    description: Optional execution-layer configuration (remote state, etc.)
+    properties:
+      state:
+        type: object
+        description: Controls where execution state is stored.
+        properties:
+          mode:
+            type: string
+            description: State storage mode. "local" uses the filesystem (default); "remote" uses orun-backend.
+            enum:
+              - local
+              - remote
+          backendUrl:
+            type: string
+            description: URL of the orun-backend instance (required when mode is remote).
+            format: uri
+        additionalProperties: false
+    additionalProperties: false
   components:
     type: array
     items:
