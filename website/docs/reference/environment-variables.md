@@ -15,7 +15,7 @@ title: Environment variables
 | `ORUN_NO_COLOR` | Disable ANSI color output (any non-empty value) |
 | `ORUN_REMOTE_STATE` | Set to `true` to enable remote state coordination via orun-backend |
 | `ORUN_BACKEND_URL` | URL of the orun-backend instance (required when `ORUN_REMOTE_STATE=true`) |
-| `ORUN_TOKEN` | Static API token for authenticating against orun-backend (fallback to OIDC in GitHub Actions) |
+| `ORUN_TOKEN` | Static API token for orun-backend authentication. Fallback only — in GitHub Actions, OIDC is used automatically and is the required auth method for the live backend's mutable operations |
 | `GITHUB_ACTIONS` | Causes `run` to auto-select the GitHub Actions backend when set to `true` |
 | `GITHUB_WORKSPACE` | Used as the default workdir for the GitHub Actions backend when `--workdir` is not set |
 

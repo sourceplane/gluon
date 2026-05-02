@@ -1,13 +1,18 @@
 # remote-state-matrix.yml
 #
-# Runs orun jobs in parallel GitHub Actions matrix workers coordinated through
-# orun-backend remote state.  Dependencies (e.g. api/web only after foundation)
-# are enforced by the backend — each job polls until its deps complete, then
-# claims work and executes.
+# Copyable workflow example: runs orun jobs in parallel GitHub Actions matrix
+# workers coordinated through orun-backend remote state.
 #
-# Required secrets / variables:
-#   ORUN_BACKEND_URL  - URL of your orun-backend instance
-#   ORUN_TOKEN        - API token (or rely on OIDC if backend supports it)
+# Dependencies (e.g. api/web only after foundation) are enforced by the
+# backend — each job polls until its deps complete, then claims work and
+# executes.
+#
+# Required repository configuration:
+#   vars.ORUN_BACKEND_URL  - URL of your orun-backend instance
+#
+# Authentication:
+#   GitHub Actions OIDC (id-token: write) — the live backend uses OIDC JWT
+#   verification. No static ORUN_TOKEN is needed for mutable operations.
 
 name: remote-state-matrix
 
@@ -16,64 +21,195 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+  id-token: write
+
 jobs:
   plan:
-    name: Generate plan
+    name: Compile plan
     runs-on: ubuntu-latest
     outputs:
-      plan-id: ${{ steps.plan.outputs.plan-id }}
-      matrix: ${{ steps.plan.outputs.matrix }}
+      plan_id: ${{ steps.plan.outputs.plan_id }}
+      run_id: ${{ steps.plan.outputs.run_id }}
+      jobs: ${{ steps.matrix.outputs.jobs }}
+      first_job: ${{ steps.matrix.outputs.first_job }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
 
       - name: Install orun
-        run: |
-          curl -sSfL https://get.orun.dev | sh -s -- -b /usr/local/bin
+        run: go install ./cmd/orun
 
-      - name: Generate plan
+      - name: Compile plan
         id: plan
-        env:
-          ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
-          ORUN_TOKEN: ${{ secrets.ORUN_TOKEN }}
+        working-directory: examples/remote-state-matrix
         run: |
-          orun plan --output plan.json --format json
-          echo "plan-id=$(cat plan.json | jq -r '.metadata.checksum')" >> "$GITHUB_OUTPUT"
-          # Emit matrix: one entry per job ID in the plan
-          MATRIX=$(cat plan.json | jq -c '[.jobs[].id]')
-          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          orun plan --name remote-state-e2e --all
+          plan_id="$(orun get plans -o json | jq -r '.[] | select(.Name == "remote-state-e2e") | .Checksum')"
+          run_id="gha-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${plan_id}"
+          echo "plan_id=${plan_id}" >> "${GITHUB_OUTPUT}"
+          echo "run_id=${run_id}" >> "${GITHUB_OUTPUT}"
 
-      - uses: actions/upload-artifact@v4
+      - name: Build job matrix
+        id: matrix
+        working-directory: examples/remote-state-matrix
+        run: |
+          jobs="$(orun get jobs --plan '${{ steps.plan.outputs.plan_id }}' --all -o json \
+            | jq -c '[.[] | {job: .id, env: .environment, component: .component}]')"
+          first_job="$(printf '%s' "${jobs}" | jq -r '.[0].job')"
+          # Append a duplicate entry to prove idempotent claim / already-complete behavior.
+          jobs="$(printf '%s' "${jobs}" | jq -c --arg job "${first_job}" '. + [{job: $job, env: "duplicate", component: "duplicate"}]')"
+          echo "jobs=${jobs}" >> "${GITHUB_OUTPUT}"
+          echo "first_job=${first_job}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload compiled plan
+        uses: actions/upload-artifact@v4
         with:
-          name: orun-plan
-          path: plan.json
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+          if-no-files-found: error
 
-  run:
-    name: Run ${{ matrix.job }}
+  run-one-job-per-runner:
+    name: "Run: ${{ matrix.job }}"
     needs: plan
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        job: ${{ fromJson(needs.plan.outputs.matrix) }}
+        include: ${{ fromJson(needs.plan.outputs.jobs) }}
+    env:
+      ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+      ORUN_REMOTE_STATE: "true"
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Download compiled plan
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+
+      - name: Run selected job through remote state
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun run '${{ needs.plan.outputs.plan_id }}' \
+            --job '${{ matrix.job }}' \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --gha \
+            --verbose
+
+  run-env-fanout:
+    name: "Env fanout: ${{ matrix.env_name }}"
+    needs: plan
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env_name: [dev, stage]
+    env:
+      ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+      ORUN_REMOTE_STATE: "true"
+      ORUN_EXEC_ID: env-${{ needs.plan.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Download compiled plan
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+
+      - name: Run environment slice through remote state
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun run '${{ needs.plan.outputs.plan_id }}' \
+            --env '${{ matrix.env_name }}' \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --gha
+
+  verify:
+    name: Verify remote status and logs
+    needs: [plan, run-one-job-per-runner, run-env-fanout]
+    if: always()
+    runs-on: ubuntu-latest
+    env:
+      ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
+      ORUN_REMOTE_STATE: "true"
+      ORUN_EXEC_ID: ${{ needs.plan.outputs.run_id }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install orun
-        run: |
-          curl -sSfL https://get.orun.dev | sh -s -- -b /usr/local/bin
-
-      - uses: actions/download-artifact@v4
+      - uses: actions/setup-go@v5
         with:
-          name: orun-plan
+          go-version-file: go.mod
 
-      - name: Execute job
-        env:
-          ORUN_BACKEND_URL: ${{ vars.ORUN_BACKEND_URL }}
-          ORUN_TOKEN: ${{ secrets.ORUN_TOKEN }}
-          ORUN_PLAN_ID: ${{ needs.plan.outputs.plan-id }}
+      - name: Install orun
+        run: go install ./cmd/orun
+
+      - name: Download compiled plan
+        uses: actions/download-artifact@v4
+        with:
+          name: orun-remote-state-plan
+          path: examples/remote-state-matrix/.orun/plans/
+
+      - name: Verify remote status
+        working-directory: examples/remote-state-matrix
         run: |
-          orun run \
+          orun status \
             --remote-state \
-            --backend-url "$ORUN_BACKEND_URL" \
-            --plan plan.json \
-            --job "${{ matrix.job }}"
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --exec-id "${ORUN_EXEC_ID}" \
+            --json
+
+      - name: Verify remote logs
+        working-directory: examples/remote-state-matrix
+        run: |
+          orun logs \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --exec-id "${ORUN_EXEC_ID}" \
+            --job '${{ needs.plan.outputs.first_job }}'
+
+      - name: Assert all jobs succeeded
+        working-directory: examples/remote-state-matrix
+        run: |
+          status_json="$(orun status \
+            --remote-state \
+            --backend-url "${ORUN_BACKEND_URL}" \
+            --exec-id "${ORUN_EXEC_ID}" \
+            --json)"
+          echo "${status_json}" | jq .
+          # Check that no jobs are in failed state
+          failed="$(echo "${status_json}" | jq '[.state.jobs | to_entries[] | select(.value.status == "failed")] | length')"
+          if [ "${failed}" -gt 0 ]; then
+            echo "ERROR: ${failed} job(s) failed"
+            exit 1
+          fi
+          echo "All jobs passed remote state verification."

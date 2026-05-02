@@ -4,25 +4,26 @@ metadata:
   name: remote-state-matrix-demo
   description: |
     Demonstrates distributed GitHub Actions matrix execution via orun-backend remote state.
-    A DAG of three components (foundation → api, web) runs across dev and stage environments.
+    A DAG of three components (foundation → api → web) runs across dev and stage environments.
+
+compositions:
+  sources:
+    - name: smoke-compositions
+      kind: dir
+      path: ./compositions
 
 execution:
   state:
     mode: remote
-    backendUrl: https://orun-backend.example.com
+    backendUrl: https://orun-api.rahulvarghesepullely.workers.dev
 
 environments:
   dev:
     defaults:
-      cluster: dev-eks
+      cluster: dev-smoke
   stage:
-    selectors:
-      components:
-        - foundation
-        - api
-        - web
     defaults:
-      cluster: stage-eks
+      cluster: stage-smoke
 
 components:
   - name: foundation
@@ -55,5 +56,5 @@ components:
     inputs:
       chart: charts/web
     dependsOn:
-      - component: foundation
+      - component: api
         condition: success

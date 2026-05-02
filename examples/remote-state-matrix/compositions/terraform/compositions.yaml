@@ -1,0 +1,49 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: terraform
+spec:
+  type: terraform
+  description: Smoke-test composition for remote-state conformance (no cloud credentials)
+  defaultJob: smoke
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Terraform Smoke Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        const: terraform
+      inputs:
+        type: object
+        required:
+          - module
+        properties:
+          module:
+            type: string
+            description: Module path (unused in smoke mode)
+  jobs:
+    - name: smoke
+      description: Harmless smoke step that prints markers and sleeps briefly
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 0
+      steps:
+        - name: validate
+          shell: bash
+          run: |
+            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke validate ==="
+            echo "module={{.module}}"
+            sleep 2
+            echo "=== DONE ==="
+        - name: apply
+          shell: bash
+          run: |
+            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke apply ==="
+            sleep 1
+            echo "=== DONE ==="

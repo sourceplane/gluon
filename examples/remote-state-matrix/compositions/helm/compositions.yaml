@@ -1,0 +1,49 @@
+apiVersion: sourceplane.io/v1alpha1
+kind: Composition
+metadata:
+  name: helm
+spec:
+  type: helm
+  description: Smoke-test composition for remote-state conformance (no cloud credentials)
+  defaultJob: smoke
+  inputSchema:
+    $schema: http://json-schema.org/draft-07/schema#
+    title: Helm Smoke Component
+    type: object
+    required:
+      - name
+      - type
+      - inputs
+    properties:
+      name:
+        type: string
+      type:
+        const: helm
+      inputs:
+        type: object
+        required:
+          - chart
+        properties:
+          chart:
+            type: string
+            description: Chart path (unused in smoke mode)
+  jobs:
+    - name: smoke
+      description: Harmless smoke step that prints markers and sleeps briefly
+      runsOn: ubuntu-22.04
+      timeout: 5m
+      retries: 0
+      steps:
+        - name: lint
+          shell: bash
+          run: |
+            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke lint ==="
+            echo "chart={{.chart}}"
+            sleep 2
+            echo "=== DONE ==="
+        - name: deploy
+          shell: bash
+          run: |
+            echo "=== SMOKE: {{.Component}}@{{.Environment}}.smoke deploy ==="
+            sleep 1
+            echo "=== DONE ==="
