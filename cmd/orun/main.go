@@ -687,6 +687,7 @@ func printComponentCompact(comp *expand.ComponentMerged, color bool) {
 
 func main() {
 	if err := rootCmd.Execute(); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }
