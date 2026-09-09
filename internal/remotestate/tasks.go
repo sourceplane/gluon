@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 )
 
 // Tasks client (orun-tasks O2) — the CLI's door to the task plane:
@@ -34,6 +35,28 @@ type PublicTask struct {
 	// ContractHash is present when a contract is attached — the identity
 	// every gate decision cites.
 	ContractHash string `json:"contractHash"`
+	// Brief is orun's own "what done looks like" on a native task (W3);
+	// Assignee is who in orun took it up — a member (usr_…) or an agent
+	// principal (sp_…) — orun's fact, never the tracker's (TV4).
+	Brief    string `json:"brief"`
+	Assignee string `json:"assignee"`
+	// Epic and Milestone are where the task belongs (E1/W3), when clubbed.
+	Epic      *TaskEpicRef      `json:"epic,omitempty"`
+	Milestone *TaskMilestoneRef `json:"milestone,omitempty"`
+}
+
+// TaskEpicRef is the epic membership as PublicTask carries it: the durable
+// handle, the human slug and the minted key (EP-n; empty before backfill).
+type TaskEpicRef struct {
+	ID   string `json:"id"`
+	Slug string `json:"slug"`
+	Key  string `json:"key"`
+}
+
+// TaskMilestoneRef is the milestone (phase) membership: handle plus name.
+type TaskMilestoneRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 // TaskDerive mirrors CreateTaskRequest.derive: repo prefix + issue number
@@ -51,6 +74,42 @@ type TaskCreateRequest struct {
 	Derive      *TaskDerive `json:"derive,omitempty"`
 	MintPrefix  string      `json:"mintPrefix,omitempty"`
 	TitleMirror string      `json:"titleMirror,omitempty"`
+	// Brief is the W3 brief (at most 4000 chars server-side).
+	Brief string `json:"brief,omitempty"`
+	// Epic / Milestone club the task in the same create (an epc_… id, an
+	// EP-n key or a slug; an mls_… id, which implies its epic). Resolved
+	// before the key is minted — a bad ref is a 422, never a half-made task.
+	Epic      string `json:"epic,omitempty"`
+	Milestone string `json:"milestone,omitempty"`
+	// Assignee is a subject ref (usr_… / sp_…) or "me" for the caller.
+	Assignee string `json:"assignee,omitempty"`
+}
+
+// TaskListFilter mirrors ListTasksFilter's membership and assignment
+// filters (E4 / TV4): an epic ref (epc_… or slug), a milestone id (mls_…),
+// and an assignee — a subject ref, "me" (the caller) or "agents" (any
+// sp_… assignee). Empty fields do not filter.
+type TaskListFilter struct {
+	Epic      string
+	Milestone string
+	Assignee  string
+}
+
+func (f TaskListFilter) query() string {
+	q := url.Values{}
+	if f.Epic != "" {
+		q.Set("epic", f.Epic)
+	}
+	if f.Milestone != "" {
+		q.Set("milestone", f.Milestone)
+	}
+	if f.Assignee != "" {
+		q.Set("assignee", f.Assignee)
+	}
+	if len(q) == 0 {
+		return ""
+	}
+	return "?" + q.Encode()
 }
 
 // TasksList mirrors ListTasksResponse.
@@ -133,10 +192,16 @@ func (c *Client) CreateTask(ctx context.Context, org string, req TaskCreateReque
 	return &resp.Task, nil
 }
 
-// ListTasks fetches the org's tasks.
+// ListTasks fetches the org's tasks (newest first, unfiltered).
 func (c *Client) ListTasks(ctx context.Context, org string) (*TasksList, error) {
+	return c.ListTasksWhere(ctx, org, TaskListFilter{})
+}
+
+// ListTasksWhere fetches the org's tasks narrowed by membership and/or
+// assignment — the read a find-or-create loop keys on (`epic` + title).
+func (c *Client) ListTasksWhere(ctx context.Context, org string, filter TaskListFilter) (*TasksList, error) {
 	var resp TasksList
-	if err := c.doJSON(ctx, http.MethodGet, tasksPathFor(org, ""), nil, &resp, true); err != nil {
+	if err := c.doJSON(ctx, http.MethodGet, tasksPathFor(org, filter.query()), nil, &resp, true); err != nil {
 		return nil, err
 	}
 	return &resp, nil

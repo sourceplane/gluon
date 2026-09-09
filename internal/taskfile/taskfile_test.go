@@ -132,3 +132,29 @@ func TestMissing(t *testing.T) {
 		t.Fatalf("complete contract reported missing: %v", m)
 	}
 }
+
+func TestParseTemplateIsUnbound(t *testing.T) {
+	body := []byte("apiVersion: orun.io/v1\nkind: TaskContract\nspec:\n  goal: g\n  affects: [a]\n  doneWhen: [d]\n  gates: []\n")
+	doc, err := ParseTemplate("anything.yaml", body)
+	if err != nil {
+		t.Fatalf("ParseTemplate: %v", err)
+	}
+	if doc.Key != "" {
+		t.Fatalf("template key = %q, want empty", doc.Key)
+	}
+	if !doc.Contract.GatesDefined || !doc.Contract.Complete() {
+		t.Fatalf("template contract %+v: want gatesDefined + complete", doc.Contract)
+	}
+	// Parse (the bound form) refuses the same bytes: no name, no key.
+	if _, err := Parse("anything.yaml", body); err == nil {
+		t.Fatal("Parse accepted an unbound template")
+	}
+	// A bound name still parses through the template door, and a non-key
+	// name is refused with the template hint.
+	if d, err := ParseTemplate("x.yaml", append([]byte("metadata:\n  name: ENG-1\n"), body...)); err != nil || d.Key != "ENG-1" {
+		t.Fatalf("bound template: %v %+v", err, d)
+	}
+	if _, err := ParseTemplate("x.yaml", append([]byte("metadata:\n  name: nope\n"), body...)); err == nil {
+		t.Fatal("ParseTemplate accepted a non-key name")
+	}
+}

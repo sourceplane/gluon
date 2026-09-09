@@ -60,28 +60,48 @@ func taskDocRoot() string {
 
 func newTaskCreateCommand() *cobra.Command {
 	var (
-		workspace  string
-		backendURL string
-		asJSON     bool
-		adoptKey   string
-		derive     string
-		mintPrefix string
-		title      string
+		workspace    string
+		backendURL   string
+		asJSON       bool
+		adoptKey     string
+		derive       string
+		mintPrefix   string
+		title        string
+		brief        string
+		epic         string
+		milestone    string
+		assignee     string
+		contractPath string
 	)
 	cmd := &cobra.Command{
 		Use:   "create",
-		Short: "Ask the allocator for a task; attach the repo's contract if one exists",
+		Short: "Ask the allocator for a task; club it, brief it, and attach its contract in one breath",
 		Long: `Create a task. The key comes from the cloud allocator's ladder — adopt a
 tracker key (--adopt), derive from a repo issue (--derive web#123), or
-mint from a sequence (--prefix). If tasks/<KEY>.TaskContract.yaml exists
-for the issued key it is sealed and attached in the same breath, and the
-task is recorded in the local object store (refs/tasks/<KEY>).`,
+mint from a sequence (--prefix). Where it belongs is set in the same
+create (--epic, --milestone — resolved before the key is minted, so a bad
+ref never leaves a half-made task), as are its brief (--brief) and who
+takes it up (--assignee me).
+
+The contract: --contract <file> attaches an explicit TaskContract document
+(a template, unbound to any key — what a bootstrap keeps beside its
+flows). Without it, tasks/<KEY>.TaskContract.yaml is attached if one
+exists for the issued key. Either way the task is recorded in the local
+object store (refs/tasks/<KEY>).
+
+A task whose contract declares its gates — an explicit 'gates: []' means
+merge alone finishes the work — can fold to done; one created without a
+contract parks at in_review after its merge.`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			req := remotestate.TaskCreateRequest{
 				AdoptKey:    adoptKey,
 				MintPrefix:  mintPrefix,
 				TitleMirror: title,
+				Brief:       brief,
+				Epic:        epic,
+				Milestone:   milestone,
+				Assignee:    assignee,
 			}
 			if derive != "" {
 				d, err := parseDeriveRef(derive)
@@ -89,6 +109,16 @@ task is recorded in the local object store (refs/tasks/<KEY>).`,
 					return err
 				}
 				req.Derive = d
+			}
+			// Read the template BEFORE creating: a malformed document must
+			// not cost a minted key.
+			var template *taskfile.Document
+			if contractPath != "" {
+				doc, err := taskfile.LoadTemplate(contractPath)
+				if err != nil {
+					return fmt.Errorf("orun task create: --contract: %w", err)
+				}
+				template = doc
 			}
 			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
@@ -100,7 +130,16 @@ task is recorded in the local object store (refs/tasks/<KEY>).`,
 				return fmt.Errorf("orun task create: %w", err)
 			}
 
-			doc, hash, attachErr := attachDocumentIfPresent(cmd.Context(), client, org, task.Key)
+			var (
+				doc       *taskfile.Document
+				hash      string
+				attachErr error
+			)
+			if template != nil {
+				doc, hash, attachErr = attachTemplate(cmd.Context(), client, org, task.Key, template)
+			} else {
+				doc, hash, attachErr = attachDocumentIfPresent(cmd.Context(), client, org, task.Key)
+			}
 			sealNote := sealTaskLocally(cmd.Context(), task, doc)
 
 			if asJSON {
@@ -109,17 +148,18 @@ task is recorded in the local object store (refs/tasks/<KEY>).`,
 					"contractHash": hash,
 				})
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "created %s (%s)\n", task.Key, task.ID)
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "created %s (%s)%s\n", task.Key, task.ID, taskWhere(task))
 			switch {
 			case attachErr != nil:
-				fmt.Fprintf(cmd.OutOrStdout(), "contract not attached: %v\n", attachErr)
+				fmt.Fprintf(out, "contract not attached: %v\n", attachErr)
 			case doc != nil:
-				fmt.Fprintf(cmd.OutOrStdout(), "contract %s attached from %s\n", shortRevision(hash), doc.Path)
+				fmt.Fprintf(out, "contract %s attached from %s%s\n", shortRevision(hash), doc.Path, gatesNote(doc))
 			default:
-				fmt.Fprintf(cmd.OutOrStdout(), "no contract document (%s) — created without narrowing\n", taskfile.PathFor(taskDocRoot(), task.Key))
+				fmt.Fprintf(out, "no contract document (%s) — created without narrowing\n", taskfile.PathFor(taskDocRoot(), task.Key))
 			}
 			if sealNote != "" {
-				fmt.Fprintln(cmd.OutOrStdout(), sealNote)
+				fmt.Fprintln(out, sealNote)
 			}
 			if attachErr != nil {
 				return fmt.Errorf("orun task create: contract attach: %w", attachErr)
@@ -131,8 +171,45 @@ task is recorded in the local object store (refs/tasks/<KEY>).`,
 	cmd.Flags().StringVar(&derive, "derive", "", "derive the key from a repo issue (prefix#number, e.g. web#123)")
 	cmd.Flags().StringVar(&mintPrefix, "prefix", "", "sequence prefix for minted keys (default TSK)")
 	cmd.Flags().StringVar(&title, "title", "", "display title mirror")
+	cmd.Flags().StringVar(&brief, "brief", "", "the brief: what done looks like, in a paragraph")
+	cmd.Flags().StringVar(&epic, "epic", "", "club the task under this epic (epc_… id, EP-n key, or slug)")
+	cmd.Flags().StringVar(&milestone, "milestone", "", "place the task in this milestone/phase (mls_… id; implies its epic)")
+	cmd.Flags().StringVar(&assignee, "assignee", "", "who takes it up: a subject ref (usr_… / sp_…) or 'me'")
+	cmd.Flags().StringVar(&contractPath, "contract", "", "attach this TaskContract document (a template; metadata.name optional) instead of tasks/<KEY>.TaskContract.yaml")
 	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
+}
+
+// taskWhere renders a task's membership for the create/show lines:
+// " in milestone <name>" beats " under epic <slug>" (a milestone implies
+// its epic); nothing when unclubbed.
+func taskWhere(task *remotestate.PublicTask) string {
+	switch {
+	case task.Milestone != nil:
+		name := task.Milestone.Name
+		if name == "" {
+			name = task.Milestone.ID
+		}
+		return " in milestone " + name
+	case task.Epic != nil:
+		return " under epic " + task.Epic.Slug
+	}
+	return ""
+}
+
+// gatesNote says what the attached contract lets a merge do — the one
+// authored fact that decides whether the task can ever fold to done.
+func gatesNote(doc *taskfile.Document) string {
+	if doc == nil || doc.Contract == nil {
+		return ""
+	}
+	switch {
+	case len(doc.Contract.Gates) > 0:
+		return fmt.Sprintf(" (%d gate(s))", len(doc.Contract.Gates))
+	case doc.Contract.GatesDefined:
+		return " (merge alone finishes it)"
+	}
+	return " (gates undeclared — a merge parks at in_review)"
 }
 
 func newTaskAttachCommand() *cobra.Command {
@@ -195,17 +272,18 @@ func newTaskListCommand() *cobra.Command {
 		workspace  string
 		backendURL string
 		asJSON     bool
+		filter     remotestate.TaskListFilter
 	)
 	cmd := &cobra.Command{
 		Use:   "list",
-		Short: "The workspace's tasks: key, id, title mirror, contract",
+		Short: "The workspace's tasks: key, id, title mirror, where it belongs, contract",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := cloudClient(cmd.Context(), backendURL, workspace)
 			if err != nil {
 				return err
 			}
-			list, err := client.ListTasks(cmd.Context(), client.Scope().OrgID)
+			list, err := client.ListTasksWhere(cmd.Context(), client.Scope().OrgID, filter)
 			if err != nil {
 				return fmt.Errorf("orun task list: %w", err)
 			}
@@ -214,12 +292,16 @@ func newTaskListCommand() *cobra.Command {
 			}
 			rows := make([][]string, 0, len(list.Tasks))
 			for _, t := range list.Tasks {
-				rows = append(rows, []string{t.Key, t.ID, orDash(t.TitleMirror), orDash(shortRevision(t.ContractHash))})
+				t := t
+				rows = append(rows, []string{t.Key, t.ID, orDash(t.TitleMirror), orDash(strings.TrimSpace(taskWhere(&t))), orDash(shortRevision(t.ContractHash))})
 			}
-			fmt.Fprint(cmd.OutOrStdout(), renderColumns([]string{"KEY", "ID", "TITLE", "CONTRACT"}, rows))
+			fmt.Fprint(cmd.OutOrStdout(), renderColumns([]string{"KEY", "ID", "TITLE", "WHERE", "CONTRACT"}, rows))
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&filter.Epic, "epic", "", "only tasks clubbed under this epic (epc_… id or slug)")
+	cmd.Flags().StringVar(&filter.Milestone, "milestone", "", "only tasks in this milestone (mls_… id)")
+	cmd.Flags().StringVar(&filter.Assignee, "assignee", "", "only tasks assigned to this subject, 'me', or 'agents'")
 	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
 	return cmd
 }
@@ -255,6 +337,18 @@ func newTaskShowCommand() *cobra.Command {
 			fmt.Fprintf(out, "%s  %s\n", task.Key, task.ID)
 			if task.TitleMirror != "" {
 				fmt.Fprintf(out, "title     %s\n", task.TitleMirror)
+			}
+			if task.Epic != nil {
+				fmt.Fprintf(out, "epic      %s (%s)\n", task.Epic.Slug, orDash(task.Epic.Key))
+			}
+			if task.Milestone != nil {
+				fmt.Fprintf(out, "milestone %s (%s)\n", orDash(task.Milestone.Name), task.Milestone.ID)
+			}
+			if task.Assignee != "" {
+				fmt.Fprintf(out, "assignee  %s\n", task.Assignee)
+			}
+			if task.Brief != "" {
+				fmt.Fprintf(out, "brief     %s\n", task.Brief)
 			}
 			fmt.Fprintf(out, "rung      %s — %s\n", verdict.Verdict.Rung, verdict.Verdict.Evidence.Reason)
 			if verdict.Verdict.Pin != nil {
@@ -429,6 +523,21 @@ func attachDocumentIfPresent(ctx context.Context, client *remotestate.Client, or
 	if err != nil || doc == nil {
 		return nil, "", err
 	}
+	hash, wire, err := contract.ContractID(doc.Contract)
+	if err != nil {
+		return doc, "", err
+	}
+	if _, err := client.AttachTaskContract(ctx, org, key, wire, hash); err != nil {
+		return doc, hash, err
+	}
+	return doc, hash, nil
+}
+
+// attachTemplate seals an explicit (unbound) contract document and attaches
+// it to the just-issued key; the Document handed back is bound to that key
+// so the local seal records it like a repo-authored one.
+func attachTemplate(ctx context.Context, client *remotestate.Client, org, key string, template *taskfile.Document) (*taskfile.Document, string, error) {
+	doc := &taskfile.Document{Key: key, Path: template.Path, Contract: template.Contract}
 	hash, wire, err := contract.ContractID(doc.Contract)
 	if err != nil {
 		return doc, "", err
