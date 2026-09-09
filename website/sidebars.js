@@ -111,6 +111,7 @@ const sidebars = {
         'cli/orun-integrations',
         'cli/orun-policy',
         'cli/orun-task',
+        'cli/orun-pr',
         'cli/orun-mcp',
       ],
     },

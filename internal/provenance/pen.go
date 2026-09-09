@@ -55,10 +55,18 @@ type OpenRequest struct {
 	Title   string
 	Base    string // default: the remote's default branch guess ("main")
 	Draft   bool
+	// BranchSlug, when set, is the slug half of the grammar branch verbatim
+	// (orun/<key>-<slug>) instead of Slugify(Title) — a flow that names its
+	// landings (03-infrastructure) keeps the branch it documents. Must
+	// already be in the slug alphabet; it is never re-slugified.
+	BranchSlug string
 	// Prose is the human half of the body; the manifest block is appended.
 	Prose    string
 	Manifest Manifest
 }
+
+// branchSlugRe is the slug half of BranchRe — what BranchSlug must satisfy.
+var branchSlugRe = regexp.MustCompile(`^[a-z0-9-]+$`)
 
 // OpenResult reports what the pen actually did.
 type OpenResult struct {
@@ -66,6 +74,7 @@ type OpenResult struct {
 	Pushed     bool   `json:"pushed"`
 	Opened     bool   `json:"opened"`
 	URL        string `json:"url,omitempty"`        // the PR when opened
+	Number     int    `json:"number,omitempty"`     // the PR number when opened
 	CompareURL string `json:"compareUrl,omitempty"` // the fallback gesture
 	Body       string `json:"body"`                 // prose + manifest, as sent (or to paste)
 }
@@ -88,7 +97,14 @@ func (p *Pen) Open(ctx context.Context, req OpenRequest) (*OpenResult, error) {
 	}
 	branch := current
 	if TaskKeyOfBranch(current) != req.TaskKey {
-		branch = BranchName(req.TaskKey, req.Title)
+		if req.BranchSlug != "" {
+			if !branchSlugRe.MatchString(req.BranchSlug) {
+				return nil, fmt.Errorf("provenance: branch slug %q is not in the grammar's alphabet [a-z0-9-]", req.BranchSlug)
+			}
+			branch = "orun/" + req.TaskKey + "-" + req.BranchSlug
+		} else {
+			branch = BranchName(req.TaskKey, req.Title)
+		}
 		if _, err := p.git(ctx, "checkout", "-B", branch); err != nil {
 			return nil, err
 		}
@@ -167,10 +183,12 @@ func (p *Pen) Open(ctx context.Context, req OpenRequest) (*OpenResult, error) {
 	}
 	var created struct {
 		HTMLURL string `json:"html_url"`
+		Number  int    `json:"number"`
 	}
 	if err := json.Unmarshal(raw, &created); err == nil && created.HTMLURL != "" {
 		out.Opened = true
 		out.URL = created.HTMLURL
+		out.Number = created.Number
 	}
 	return out, nil
 }
