@@ -4,12 +4,15 @@
 // internal/remotestate. The stdio transport lives in internal/mcpserve; this
 // package supplies the tools.
 //
-// The vendored manifest carries 27 tools (21 reads + 6 writes) and this
+// The vendored manifest carries 33 tools (24 reads + 9 writes) and this
 // plane advertises all of them. It advertised a subset until the work-plane
 // teardown (orun-work-teardown WT2): four work reads were ceded to
 // internal/workmcp, which served them natively. Both the TS tools and the
 // Go plane that shadowed them are gone, so the subset and the whole are now
-// the same roster.
+// the same roster. The task plane's six (task_list, task_get,
+// policy_preview, task_create, epic_create, milestone_create — orun-tasks
+// M1/M2 + BT0) joined the vendor at orun-baseline-tracking BT-O3, served
+// natively in tasks.go.
 //
 // Tool names, descriptions, input schemas, and annotations are EMBEDDED from
 // the vendored contract (specs/orun-cloud/vendored/mcp-tool-manifest.json —
@@ -83,7 +86,7 @@ type toolSpec struct {
 }
 
 // embedded is the parsed manifest; allTools the plane's advertised roster
-// (21 reads + 6 writes — the whole manifest), in manifest order. Resources
+// (24 reads + 9 writes — the whole manifest), in manifest order. Resources
 // and prompts come off embedded directly (resources.go / prompts.go).
 var embedded = mustParseManifest()
 

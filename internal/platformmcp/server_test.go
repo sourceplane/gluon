@@ -24,6 +24,8 @@ type fakeAPI struct {
 	pages []*remotestate.PlatformPage
 	doc   []byte
 	err   error
+	// tasks holds the task-plane fixtures (tasks_test.go); nil = empty plane.
+	tasks *taskFixtures
 }
 
 func page(data, meta string) *remotestate.PlatformPage {
@@ -544,8 +546,9 @@ func TestComposedServer(t *testing.T) {
 	}
 	// 72 → 28 at WT2: the 45-tool work plane is gone; the pen it carried
 	// stands on its own beside the platform roster.
-	if len(toolsResp.Result.Tools) != 28 {
-		t.Fatalf("merged roster = %d tools, want 28 (1 pen + 27 platform — WT2)", len(toolsResp.Result.Tools))
+	// 28 → 34 at BT-O3: the task plane's six joined the vendor.
+	if len(toolsResp.Result.Tools) != 34 {
+		t.Fatalf("merged roster = %d tools, want 34 (1 pen + 33 platform — BT-O3)", len(toolsResp.Result.Tools))
 	}
 	for _, tool := range toolsResp.Result.Tools {
 		for _, frag := range mcpserve.ForbiddenNameFragments {
@@ -604,8 +607,9 @@ func TestComposedServerReadOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 66 → 22 at WT2: 21 platform reads plus the pen.
-	if len(toolsResp.Result.Tools) != 22 {
-		t.Fatalf("read-only roster = %d tools, want 22 (1 pen + 21 platform reads — WT2)", len(toolsResp.Result.Tools))
+	// 22 → 25 at BT-O3: three task-plane reads.
+	if len(toolsResp.Result.Tools) != 25 {
+		t.Fatalf("read-only roster = %d tools, want 25 (1 pen + 24 platform reads — BT-O3)", len(toolsResp.Result.Tools))
 	}
 	penCount := 0
 	for _, tool := range toolsResp.Result.Tools {

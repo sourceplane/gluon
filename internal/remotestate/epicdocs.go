@@ -69,3 +69,19 @@ func (c *Client) ListEpicDocs(ctx context.Context, org, epicRef string) (*EpicDo
 	}
 	return &resp, nil
 }
+
+// EpicDocView mirrors GetEpicDocResponse: the pointer plus the sealed
+// snapshot's content — the single read that carries a body.
+type EpicDocView struct {
+	Doc     EpicDoc `json:"doc"`
+	Content string  `json:"content"`
+}
+
+// GetEpicDoc fetches one spec doc's pointer and content.
+func (c *Client) GetEpicDoc(ctx context.Context, org, epicRef, slug string) (*EpicDocView, error) {
+	var resp EpicDocView
+	if err := c.doJSON(ctx, http.MethodGet, epicDocsPathFor(org, epicRef, "/"+urlSegment(slug)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}

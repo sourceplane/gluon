@@ -3,6 +3,7 @@ package remotestate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 )
@@ -248,6 +249,44 @@ func (c *Client) GetTaskVerdict(ctx context.Context, org, keyOrID string) (*Task
 	var resp TaskVerdictView
 	if err := c.doJSON(ctx, http.MethodGet, tasksPathFor(org, "/"+urlSegment(keyOrID)+"/verdict"), nil, &resp, true); err != nil {
 		return nil, err
+	}
+	return &resp, nil
+}
+
+// ── Writes with an Idempotency-Key (the MCP rails, orun-mcp UM2) ─────────
+
+// CreateTaskWithKey is CreateTask under a caller-chosen Idempotency-Key: a
+// retry under the same key replays the original result instead of asking
+// the allocator twice.
+func (c *Client) CreateTaskWithKey(ctx context.Context, org string, req TaskCreateRequest, idemKey string) (*PublicTask, error) {
+	page, err := c.platformDo(ctx, http.MethodPost, tasksPathFor(org, ""), req, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Task PublicTask `json:"task"`
+	}
+	if err := json.Unmarshal(page.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decoding task: %w", err)
+	}
+	return &resp.Task, nil
+}
+
+// AttachTaskContractWithKey is AttachTaskContract under a caller-chosen
+// Idempotency-Key (the create's key + ":contract" on the MCP path, so the
+// attach rides the same logical attempt).
+func (c *Client) AttachTaskContractWithKey(ctx context.Context, org, keyOrID string, contractWire json.RawMessage, contractHash, idemKey string) (*TaskContractSeal, error) {
+	req := struct {
+		Contract     json.RawMessage `json:"contract"`
+		ContractHash string          `json:"contractHash,omitempty"`
+	}{Contract: contractWire, ContractHash: contractHash}
+	page, err := c.platformDo(ctx, http.MethodPut, tasksPathFor(org, "/"+urlSegment(keyOrID)+"/contract"), req, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	var resp TaskContractSeal
+	if err := json.Unmarshal(page.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decoding contract seal: %w", err)
 	}
 	return &resp, nil
 }

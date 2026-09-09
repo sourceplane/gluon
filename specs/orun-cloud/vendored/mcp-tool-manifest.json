@@ -4,7 +4,7 @@
     {
       "args": [
         {
-          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
           "name": "workspace",
           "required": true
         },
@@ -26,7 +26,7 @@
     {
       "args": [
         {
-          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
           "name": "workspace",
           "required": true
         }
@@ -38,7 +38,7 @@
     {
       "args": [
         {
-          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
           "name": "workspace",
           "required": true
         }
@@ -50,7 +50,7 @@
     {
       "args": [
         {
-          "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+          "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
           "name": "workspace",
           "required": true
         },
@@ -66,7 +66,7 @@
     }
   ],
   "protocolRevision": "2025-06-18",
-  "readOnlyToolCount": 21,
+  "readOnlyToolCount": 24,
   "resources": [
     {
       "description": "One catalog entity as markdown: identity, owner, relations, provenance, doc index, and the overview doc body (byte-capped). `entityKey` is base64url(entityRef). The agent-facing twin of the entity page; use `catalog_search` to find refs.",
@@ -83,7 +83,7 @@
   ],
   "serverName": "orun-cloud",
   "source": "@saas/mcp",
-  "toolCount": 27,
+  "toolCount": 33,
   "tools": [
     {
       "annotations": {
@@ -134,7 +134,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -195,7 +195,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -235,7 +235,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -302,7 +302,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -366,7 +366,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -401,7 +401,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -448,7 +448,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -527,7 +527,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -598,7 +598,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -661,7 +661,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -719,7 +719,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -765,7 +765,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -791,7 +791,7 @@
         "additionalProperties": false,
         "properties": {
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -826,7 +826,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -861,7 +861,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -902,7 +902,7 @@
             "type": "integer"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -927,7 +927,7 @@
         "additionalProperties": false,
         "properties": {
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -962,7 +962,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -975,6 +975,415 @@
       },
       "name": "skill_get",
       "title": "Get a skill (body + frontmatter)"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "List the workspace's tasks (newest first) — key, key origin (adopted from a tracker vs derived by orun), mirrored title with its sync age, epic/milestone membership, and whether a contract is attached. Scope to one epic (`epic`: epc_… or slug) or one milestone (`milestone`: mls_…). For one task's full picture (contract, derived verdict, evidence) use `task_get`.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "assignee": {
+            "description": "Only tasks assigned to this subject (`usr_…` member or `sp_…` agent principal), `me` for the caller, or `agents` for any agent principal. Orun's own assignment, not the tracker's assignee.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "epic": {
+            "description": "Only tasks clubbed under this epic (`epc_…` id or slug, e.g. payments-revamp).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "milestone": {
+            "description": "Only tasks in this milestone (`mls_…` id).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "task_list",
+      "title": "List tasks"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "One ref, the full picture. A TASK (`tsk_…` or key like ENG-42): its contract and DERIVED verdict — rung (draft → ready → in_progress → in_review → done → released), the observation behind it, dependency states, cited evidence; answers \"is this actually done\", never a typed status. An EPIC (`epc_…` or slug): mirrored tracker status beside the derived rollup (rungs, done, governance) and its container contract. A MILESTONE (`mls_…`): the milestone, its epic, its contract.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "task": {
+            "description": "A task's `tsk_…` id or key (e.g. ENG-42; resolved over the newest 50 tasks), an epic's `epc_…` id or slug, or a milestone's `mls_…` id.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "task"
+        ],
+        "type": "object"
+      },
+      "name": "task_get",
+      "title": "Get task with verdict and evidence"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": true
+      },
+      "description": "Answer \"if this contract were attached, which secrets would stop resolving?\" BEFORE attaching it — attaching without previewing is a blind edit to production access. Evaluates the contract's `secrets` globs and `envs` list against the secret keys visible at one project environment, with the exact narrow-only semantics enforcement uses (effective = policy ∩ contract). Reads metadata only; secret values are never readable.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "contractEnvs": {
+            "description": "The draft contract's `envs` list. Omit = no narrowing on environments.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "contractSecrets": {
+            "description": "The draft contract's `secrets` key globs (e.g. STRIPE_TEST_*). Omit = no narrowing on keys.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "environment": {
+            "description": "Environment (public id or slug) to preview against.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "project": {
+            "description": "Project (repo) public id (`prj_…`). Use `projects_list` to discover ids.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "project",
+          "environment"
+        ],
+        "type": "object"
+      },
+      "name": "policy_preview",
+      "title": "Preview a contract's blast radius"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create a task — the unit of WORK (not a run, not a ticket). The cloud allocator is the single writer of task identity: pass `adoptKey` to adopt a tracker's own key (refused with the holder if taken), or `derive` to derive one from a linked issue (`web`+123 → WEB-123), or neither to mint from the workspace sequence. A branch named `orun/<key>-<slug>` then binds its pushes, PRs and checks to the task automatically. WRITE: policy-gated and audited; retries are replay-safe via Idempotency-Key.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "adoptKey": {
+            "description": "A tracker's key to ADOPT verbatim (e.g. ENG-412). Mutually exclusive with `derive`.",
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "assignee": {
+            "description": "Who takes it up: a subject ref (`usr_…` member or `sp_…` agent principal) or `me` for the caller.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "brief": {
+            "description": "What done looks like, in a paragraph (orun's own brief on a native task).",
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "contract": {
+            "additionalProperties": false,
+            "description": "Attach a contract in the same call so the task is born agent-ready (goal + affects + doneWhen + declared gates = complete → the task starts at `ready`).",
+            "properties": {
+              "affects": {
+                "description": "Components or areas the work touches (≥1).",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "deps": {
+                "description": "Task keys this depends on.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "designRefs": {
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "doneWhen": {
+                "description": "Observable done-criteria (≥1).",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "minItems": 1,
+                "type": "array"
+              },
+              "envs": {
+                "description": "Environments the work may touch (narrow-only).",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "gates": {
+                "description": "Check names that must pass after merge for the task to fold to done. An EMPTY list means merge alone finishes the work; omitting `contract` leaves gates undeclared and a merged PR parks at in_review.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "goal": {
+                "description": "One sentence: what this task delivers.",
+                "minLength": 1,
+                "type": "string"
+              },
+              "secrets": {
+                "description": "Secret key globs the work may resolve (narrow-only).",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "goal",
+              "affects",
+              "doneWhen",
+              "gates"
+            ],
+            "type": "object"
+          },
+          "derive": {
+            "additionalProperties": false,
+            "description": "Derive the key from a linked issue (`web`+123 → WEB-123).",
+            "properties": {
+              "issueNumber": {
+                "description": "The linked issue number.",
+                "exclusiveMinimum": 0,
+                "type": "integer"
+              },
+              "repoPrefix": {
+                "description": "Repo prefix the key derives from (e.g. `web`).",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "repoPrefix",
+              "issueNumber"
+            ],
+            "type": "object"
+          },
+          "epic": {
+            "description": "Club the task under this epic (`epc_…` id, `EP-n` key, or slug). Resolved before the key is minted; a bad ref refuses the create.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "milestone": {
+            "description": "Place the task in this milestone/phase (`mls_…`), which implies its epic.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "mintPrefix": {
+            "description": "Sequence prefix for minted keys when there is nothing to adopt or derive. Default TSK.",
+            "maxLength": 12,
+            "minLength": 1,
+            "type": "string"
+          },
+          "titleMirror": {
+            "description": "The task's title — display copy (a tracker's title is mirrored here, never owned).",
+            "maxLength": 500,
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace"
+        ],
+        "type": "object"
+      },
+      "name": "task_create",
+      "title": "Create task"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Create an orun-native epic — the container tasks and milestones club under (e.g. an infra baselining programme). Its `slug` is the human handle every other tool accepts; pass one to make re-runs findable. A slug already taken is NOT an error here: the existing epic comes back with `existed: true`, so an idempotent caller (a bootstrap flow, a retrying agent) adopts it instead of minting a duplicate. WRITE: policy-gated and audited.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "description": {
+            "description": "What this is and what done looks like.",
+            "maxLength": 4000,
+            "type": "string"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Display name (e.g. \"Infra baselining\").",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "owner": {
+            "description": "Owner: a subject ref (`usr_…` / `sp_…`) or `me` for the caller.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "slug": {
+            "description": "Human handle (e.g. infra-baselining). Omitted = minted from the name.",
+            "pattern": "^[a-z0-9][a-z0-9-]{0,62}$",
+            "type": "string"
+          },
+          "targetDate": {
+            "description": "Target date, YYYY-MM-DD.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "epic_create",
+      "title": "Create epic"
+    },
+    {
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "readOnlyHint": false
+      },
+      "description": "Add a milestone — a PHASE — to an orun-native epic, in order: `after` names the sibling it follows (`null` = first, omitted = last). Exit criteria are one line each; the epic rollup reports each phase's tasks by rung. A tracker-mirrored epic refuses (its phases are the tracker's). Same name twice makes two phases — list the epic with task_get first when re-running. WRITE: policy-gated and audited.",
+      "inputSchema": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "additionalProperties": false,
+        "properties": {
+          "after": {
+            "anyOf": [
+              {
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The sibling milestone (`mls_…`) this phase goes after; `null` puts it first; omit for last."
+          },
+          "epic": {
+            "description": "The epic (`epc_…` id, `EP-n` key, or slug).",
+            "minLength": 1,
+            "type": "string"
+          },
+          "exitCriteria": {
+            "description": "Exit criteria, one per entry.",
+            "items": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "idempotencyKey": {
+            "description": "Optional Idempotency-Key for this write (1-255 printable ASCII chars). Omit it and the tool generates a fresh key per call; supply the SAME key when retrying a call whose outcome you did not observe, so the platform replays the original result instead of double-creating.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Phase name (e.g. \"03 — infrastructure\").",
+            "maxLength": 500,
+            "minLength": 1,
+            "type": "string"
+          },
+          "targetDate": {
+            "description": "Target date, YYYY-MM-DD.",
+            "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+            "type": "string"
+          },
+          "workspace": {
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace",
+          "epic",
+          "name"
+        ],
+        "type": "object"
+      },
+      "name": "milestone_create",
+      "title": "Create milestone (phase)"
     },
     {
       "annotations": {
@@ -1002,7 +1411,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -1047,7 +1456,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -1100,7 +1509,7 @@
             "description": "Optional JSON payload served with the flag (any JSON value)."
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -1159,7 +1568,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -1194,7 +1603,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }
@@ -1240,7 +1649,7 @@
             "type": "string"
           },
           "workspace": {
-            "description": "Workspace to read from: a `ws_…` workspace id, a workspace slug, or a legacy `org_…` id (passed through verbatim; the API resolves it). Use `whoami` or `workspaces_list` to discover yours.",
+            "description": "Workspace to read from: a `ws_…` id (preferred), `account~workspace`, a slug, or a legacy `org_…` id. A bare slug is refused when two accounts share it. Use `whoami` or `workspaces_list` to discover yours.",
             "minLength": 1,
             "type": "string"
           }

@@ -3,6 +3,7 @@ package remotestate
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -106,12 +107,16 @@ type EpicMilestoneRollup struct {
 // READ. It renders beside the mirrored status as the second voice:
 // `tracker: started · orun: 4/9 done`.
 type EpicRollup struct {
-	Total      int                                `json:"total"`
-	Rungs      map[string]int                     `json:"rungs"`
-	Done       int                                `json:"done"`
-	Blocked    int                                `json:"blocked"`
-	Governance struct{ Own, Inherited, None int } `json:"governance"`
-	Milestones []EpicMilestoneRollup              `json:"milestones"`
+	Total      int            `json:"total"`
+	Rungs      map[string]int `json:"rungs"`
+	Done       int            `json:"done"`
+	Blocked    int            `json:"blocked"`
+	Governance struct {
+		Own       int `json:"own"`
+		Inherited int `json:"inherited"`
+		None      int `json:"none"`
+	} `json:"governance"`
+	Milestones []EpicMilestoneRollup `json:"milestones"`
 }
 
 // EpicView mirrors GetEpicResponse (with `?include=rollup`): the epic, its
@@ -190,6 +195,87 @@ func (c *Client) CreateMilestone(ctx context.Context, org, epicRef string, req M
 	}
 	if err := c.doJSON(ctx, http.MethodPost, epicsPathFor(org, "/"+urlSegment(epicRef)+"/milestones"), req, &resp, false); err != nil {
 		return nil, err
+	}
+	return &resp.Milestone, nil
+}
+
+// MilestoneView mirrors GetMilestoneResponse: the milestone with its epic,
+// so a caller holding just the ref climbs to the container in one hop.
+type MilestoneView struct {
+	Milestone PublicMilestone `json:"milestone"`
+	Epic      *PublicEpic     `json:"epic"`
+}
+
+// GetMilestone fetches one milestone (mls_…) with its epic.
+func (c *Client) GetMilestone(ctx context.Context, org, ref string) (*MilestoneView, error) {
+	var resp MilestoneView
+	if err := c.doJSON(ctx, http.MethodGet, orgPath(org, "/tasks/milestones/"+urlSegment(ref)), nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// ContainerContractView mirrors GetContainerContractResponse — the E3
+// governing document on an epic or a milestone. The body stays raw bytes
+// on this seam (internal/contract owns the type).
+type ContainerContractView struct {
+	ContractHash string          `json:"contractHash"`
+	Contract     json.RawMessage `json:"contract"`
+	AttachedAt   string          `json:"attachedAt"`
+}
+
+// GetContainerContract fetches the contract attached to a container
+// ("epics" or "milestones") by ref. A 404 is an answer ("ungoverned"), which
+// the caller reads with IsNotFound — never an error to surface.
+func (c *Client) GetContainerContract(ctx context.Context, org, container, ref string) (*ContainerContractView, error) {
+	var resp ContainerContractView
+	path := orgPath(org, "/tasks/"+container+"/"+urlSegment(ref)+"/contract")
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp, true); err != nil {
+		return nil, err
+	}
+	return &resp, nil
+}
+
+// IsNotFound reports whether err is the platform's 404 (the not_found code
+// or a bare 404 status).
+func IsNotFound(err error) bool {
+	apiErr, ok := err.(*APIError)
+	if !ok {
+		return false
+	}
+	return apiErr.Status == http.StatusNotFound || apiErr.Code == "not_found"
+}
+
+// ── Writes with an Idempotency-Key (the MCP rails, orun-mcp UM2) ─────────
+
+// CreateEpicWithKey is CreateEpic under a caller-chosen Idempotency-Key: a
+// retry under the same key replays the original result at the edge.
+func (c *Client) CreateEpicWithKey(ctx context.Context, org string, req EpicCreateRequest, idemKey string) (*PublicEpic, error) {
+	page, err := c.platformDo(ctx, http.MethodPost, epicsPathFor(org, ""), req, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Epic PublicEpic `json:"epic"`
+	}
+	if err := json.Unmarshal(page.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decoding epic: %w", err)
+	}
+	return &resp.Epic, nil
+}
+
+// CreateMilestoneWithKey is CreateMilestone under a caller-chosen
+// Idempotency-Key.
+func (c *Client) CreateMilestoneWithKey(ctx context.Context, org, epicRef string, req MilestoneCreateRequest, idemKey string) (*PublicMilestone, error) {
+	page, err := c.platformDo(ctx, http.MethodPost, epicsPathFor(org, "/"+urlSegment(epicRef)+"/milestones"), req, idemKey)
+	if err != nil {
+		return nil, err
+	}
+	var resp struct {
+		Milestone PublicMilestone `json:"milestone"`
+	}
+	if err := json.Unmarshal(page.Data, &resp); err != nil {
+		return nil, fmt.Errorf("decoding milestone: %w", err)
 	}
 	return &resp.Milestone, nil
 }

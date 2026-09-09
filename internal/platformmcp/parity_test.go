@@ -20,9 +20,10 @@ import (
 // description / schema / annotation drift — over the whole advertised roster
 // since UM2 (reads and writes alike).
 //
-// The manifest carries 27 tools and this plane advertises all of them. It
+// The manifest carries 33 tools and this plane advertises all of them. It
 // advertised a subset until WT2, when the four work-plane reads it used to
-// cede left the TS manifest with the plane that served them.
+// cede left the TS manifest with the plane that served them; the task
+// plane's six joined at BT-O3, served natively in tasks.go.
 
 func repoRoot(t *testing.T) string {
 	t.Helper()
@@ -120,8 +121,8 @@ func TestManifestParity(t *testing.T) {
 	if m.ToolCount != len(m.Tools) {
 		t.Fatalf("manifest toolCount %d != %d tools", m.ToolCount, len(m.Tools))
 	}
-	if len(m.Tools) != 27 {
-		t.Fatalf("WT2 expects 27 tools in the manifest, it carries %d", len(m.Tools))
+	if len(m.Tools) != 33 {
+		t.Fatalf("BT-O3 expects 33 tools in the manifest, it carries %d", len(m.Tools))
 	}
 
 	var manifestReads int
@@ -139,14 +140,14 @@ func TestManifestParity(t *testing.T) {
 	if manifestReads != m.ReadOnlyToolCount {
 		t.Fatalf("manifest readOnlyToolCount %d but %d readOnlyHint:true tools", m.ReadOnlyToolCount, manifestReads)
 	}
-	if manifestReads != 21 {
-		t.Fatalf("WT2 expects 21 read tools in the manifest, it carries %d", manifestReads)
+	if manifestReads != 24 {
+		t.Fatalf("BT-O3 expects 24 read tools in the manifest, it carries %d", manifestReads)
 	}
-	if len(wantAll) != 27 {
-		t.Fatalf("WT2 expects 27 advertised tools, got %d", len(wantAll))
+	if len(wantAll) != 33 {
+		t.Fatalf("BT-O3 expects 33 advertised tools, got %d", len(wantAll))
 	}
-	if len(wantReads) != 21 {
-		t.Fatalf("WT2 expects 21 advertised read tools, got %d", len(wantReads))
+	if len(wantReads) != 24 {
+		t.Fatalf("BT-O3 expects 24 advertised read tools, got %d", len(wantReads))
 	}
 
 	for _, tc := range []struct {
@@ -192,15 +193,15 @@ func TestManifestParity(t *testing.T) {
 // later re-vendor reintroduces a name no local plane serves, the ceding
 // machinery is gone and the plane would advertise a tool it cannot answer,
 // so the guard now runs the other way: those names must not come back
-// without an implementation.
+// without an implementation. `task_get` came back WITH one at BT-O3 (the
+// task plane's consolidated read, tasks.go) and left the retired set.
 func TestNoWorkPlaneNamesSurvive(t *testing.T) {
 	var m manifest
 	if err := json.Unmarshal(vendoredManifest(t), &m); err != nil {
 		t.Fatalf("parse vendored manifest: %v", err)
 	}
 	retired := map[string]bool{
-		"initiatives_list": true, "initiative_tree": true,
-		"task_get": true, "activity_get": true,
+		"initiatives_list": true, "initiative_tree": true, "activity_get": true,
 	}
 	for _, tool := range m.Tools {
 		if retired[tool.Name] {
