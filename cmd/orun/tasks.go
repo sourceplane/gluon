@@ -45,7 +45,263 @@ sealed by content hash wherever it travels. 'check' runs entirely offline.`,
 	cmd.AddCommand(newTaskListCommand())
 	cmd.AddCommand(newTaskShowCommand())
 	cmd.AddCommand(newTaskCheckCommand())
+	cmd.AddCommand(newTaskEpicCommand())
+	cmd.AddCommand(newTaskMilestoneCommand())
 	root.AddCommand(cmd)
+}
+
+// ── Containers (orun-baseline-tracking BT-O2) ────────────────────────────
+//
+// Epics and milestones nest under `orun task`: v2.54.0 retired the work
+// plane's `orun epic` verb with "no replacement", and these are the task
+// plane's containers — the programme tasks club under, and its phases —
+// not that verb resurrected.
+
+func newTaskEpicCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "epic",
+		Short: "Epics: the container tasks and milestones club under",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(newTaskEpicCreateCommand())
+	cmd.AddCommand(newTaskEpicShowCommand())
+	cmd.AddCommand(newTaskEpicListCommand())
+	return cmd
+}
+
+func newTaskEpicCreateCommand() *cobra.Command {
+	var (
+		workspace  string
+		backendURL string
+		asJSON     bool
+		req        remotestate.EpicCreateRequest
+	)
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Create an orun-native epic; a taken slug is adopted, not suffixed",
+		Long: `Create an epic. --slug is its human handle (every task-plane verb accepts
+it); omit it and one is minted from the name. A slug already taken in the
+workspace is NOT an error here: the existing epic is printed with
+'reusing it' and the command exits 0 — an idempotent caller (a bootstrap
+flow, a retrying agent) adopts it instead of minting a duplicate.`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if req.Name == "" {
+				return fmt.Errorf("orun task epic create: --name is required")
+			}
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			org := client.Scope().OrgID
+			epic, err := client.CreateEpic(cmd.Context(), org, req)
+			existed := false
+			if err != nil {
+				existing := remotestate.ExistingEpicOf(err)
+				if existing == nil {
+					return fmt.Errorf("orun task epic create: %w", err)
+				}
+				epic, existed = existing, true
+			}
+			if asJSON {
+				return encodeJSON(cmd, map[string]any{"epic": epic, "existed": existed})
+			}
+			if existed {
+				fmt.Fprintf(cmd.OutOrStdout(), "epic %s already exists (%s) — reusing it\n", epic.Slug, orDash(epic.Key))
+				return nil
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "created epic %s (%s, %s)\n", epic.Slug, orDash(epic.Key), epic.ID)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&req.Name, "name", "", "display name (required)")
+	cmd.Flags().StringVar(&req.Slug, "slug", "", "human handle, lowercase-hyphenated (default: minted from the name)")
+	cmd.Flags().StringVar(&req.Description, "description", "", "what this is and what done looks like")
+	cmd.Flags().StringVar(&req.TargetDate, "target-date", "", "YYYY-MM-DD")
+	cmd.Flags().StringVar(&req.Owner, "owner", "", "owner: a subject ref (usr_… / sp_…) or 'me'")
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	return cmd
+}
+
+func newTaskEpicShowCommand() *cobra.Command {
+	var (
+		workspace  string
+		backendURL string
+		asJSON     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "show <epc_id|EP-n|slug>",
+		Short: "One epic: its word beside the derived rollup, and its phases with their progress",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			view, err := client.GetEpic(cmd.Context(), client.Scope().OrgID, args[0])
+			if err != nil {
+				return fmt.Errorf("orun task epic show: %w", err)
+			}
+			if asJSON {
+				return encodeJSON(cmd, view)
+			}
+			out := cmd.OutOrStdout()
+			e := view.Epic
+			fmt.Fprintf(out, "%s  %s  %s\n", e.Slug, orDash(e.Key), e.ID)
+			if e.Name != "" {
+				fmt.Fprintf(out, "name      %s\n", e.Name)
+			}
+			voice := "orun"
+			if e.Provider != "" {
+				voice = e.Provider
+			}
+			fmt.Fprintf(out, "state     %s: %s", voice, orDash(e.State))
+			if view.Rollup != nil {
+				fmt.Fprintf(out, " · orun: %d/%d done", view.Rollup.Done, view.Rollup.Total)
+				if view.Rollup.Blocked > 0 {
+					fmt.Fprintf(out, " · %d blocked", view.Rollup.Blocked)
+				}
+			}
+			fmt.Fprintln(out)
+			if e.Owner != "" {
+				fmt.Fprintf(out, "owner     %s\n", e.Owner)
+			}
+			if e.TargetDate != "" {
+				fmt.Fprintf(out, "target    %s\n", e.TargetDate)
+			}
+			if e.Health != "" {
+				fmt.Fprintf(out, "health    %s%s\n", e.Health, map[bool]string{true: " — " + e.HealthNote, false: ""}[e.HealthNote != ""])
+			}
+			fmt.Fprintf(out, "tasks     %d\n", view.TaskCount)
+			if len(view.Milestones) > 0 {
+				progress := map[string]remotestate.EpicMilestoneRollup{}
+				if view.Rollup != nil {
+					for _, m := range view.Rollup.Milestones {
+						progress[m.ID] = m
+					}
+				}
+				rows := make([][]string, 0, len(view.Milestones))
+				for _, m := range view.Milestones {
+					p, ok := progress[m.ID]
+					done := "-"
+					if ok {
+						done = fmt.Sprintf("%d/%d", p.Done, p.Total)
+					}
+					rows = append(rows, []string{m.ID, orDash(m.Name), done, orDash(m.TargetDate)})
+				}
+				fmt.Fprintln(out)
+				fmt.Fprint(out, renderColumns([]string{"MILESTONE", "NAME", "DONE", "TARGET"}, rows))
+			}
+			return nil
+		},
+	}
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	return cmd
+}
+
+func newTaskEpicListCommand() *cobra.Command {
+	var (
+		workspace  string
+		backendURL string
+		asJSON     bool
+	)
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "The workspace's epics: slug, key, id, state, provider",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			list, err := client.ListEpics(cmd.Context(), client.Scope().OrgID)
+			if err != nil {
+				return fmt.Errorf("orun task epic list: %w", err)
+			}
+			if asJSON {
+				return encodeJSON(cmd, list)
+			}
+			rows := make([][]string, 0, len(list.Epics))
+			for _, e := range list.Epics {
+				provider := e.Provider
+				if provider == "" {
+					provider = "orun"
+				}
+				rows = append(rows, []string{e.Slug, orDash(e.Key), e.ID, orDash(e.State), provider})
+			}
+			fmt.Fprint(cmd.OutOrStdout(), renderColumns([]string{"SLUG", "KEY", "ID", "STATE", "PROVIDER"}, rows))
+			return nil
+		},
+	}
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	return cmd
+}
+
+func newTaskMilestoneCommand() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "milestone",
+		Short: "Milestones: the phases of a native epic, in order, with exit criteria",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return cmd.Help()
+		},
+	}
+	cmd.AddCommand(newTaskMilestoneCreateCommand())
+	return cmd
+}
+
+func newTaskMilestoneCreateCommand() *cobra.Command {
+	var (
+		workspace  string
+		backendURL string
+		asJSON     bool
+		epic       string
+		req        remotestate.MilestoneCreateRequest
+	)
+	cmd := &cobra.Command{
+		Use:   "create",
+		Short: "Add a phase to a native epic, positioned after a sibling (or first, or last)",
+		Long: `Add a milestone — a phase — to an epic. Position is spoken: --after names
+the sibling (mls_…) it follows, --first puts it first, neither puts it
+last. Exit criteria are one per --exit-criteria flag. The same name twice
+makes two phases: list the epic ('orun task epic show') first when you
+mean "ensure". A tracker-mirrored epic refuses (its phases are the
+tracker's).`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if epic == "" {
+				return fmt.Errorf("orun task milestone create: --epic is required (epc_…, EP-n, or the slug)")
+			}
+			if req.Name == "" {
+				return fmt.Errorf("orun task milestone create: --name is required")
+			}
+			if req.After != "" && req.First {
+				return fmt.Errorf("orun task milestone create: --after and --first are mutually exclusive")
+			}
+			client, err := cloudClient(cmd.Context(), backendURL, workspace)
+			if err != nil {
+				return err
+			}
+			m, err := client.CreateMilestone(cmd.Context(), client.Scope().OrgID, epic, req)
+			if err != nil {
+				return fmt.Errorf("orun task milestone create: %w", err)
+			}
+			if asJSON {
+				return encodeJSON(cmd, map[string]any{"milestone": m})
+			}
+			fmt.Fprintf(cmd.OutOrStdout(), "created milestone %s (%s) in epic %s\n", orDash(m.Name), m.ID, epic)
+			return nil
+		},
+	}
+	cmd.Flags().StringVar(&epic, "epic", "", "the epic (epc_… id, EP-n key, or slug) (required)")
+	cmd.Flags().StringVar(&req.Name, "name", "", "phase name (required)")
+	cmd.Flags().StringVar(&req.TargetDate, "target-date", "", "YYYY-MM-DD")
+	cmd.Flags().StringArrayVar(&req.ExitCriteria, "exit-criteria", nil, "one exit criterion (repeatable)")
+	cmd.Flags().StringVar(&req.After, "after", "", "the sibling milestone (mls_…) this phase goes after")
+	cmd.Flags().BoolVar(&req.First, "first", false, "put the phase first")
+	addCloudScopeFlags(cmd, &workspace, &backendURL, &asJSON)
+	return cmd
 }
 
 // taskDocRoot is where tasks/ documents are looked up: the repo root the
