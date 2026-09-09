@@ -210,6 +210,125 @@ func TestTaskCreateWithoutDocumentSaysSo(t *testing.T) {
 	}
 }
 
+const testTemplateDoc = `apiVersion: orun.io/v1
+kind: TaskContract
+spec:
+  goal: D1, KV and db-migrate live on stage and prod
+  affects: [infra/cloudflare-d1, infra/cloudflare-kv, infra/db-migrate]
+  doneWhen: [WIRING_* secrets published for stage and prod]
+  gates: []
+`
+
+// BT-O1: a task born clubbed, briefed, assigned and contracted in one
+// breath — the shape a bootstrap flow needs, with a template contract that
+// is not (and cannot yet be) named after the key.
+func TestTaskCreateClubsAndAttachesTemplate(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	initTempGit(t, dir)
+	tpl := filepath.Join(dir, "task-contract.yaml")
+	if err := os.WriteFile(tpl, []byte(testTemplateDoc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var created map[string]any
+	var attached struct {
+		Contract     map[string]any `json:"contract"`
+		ContractHash string         `json:"contractHash"`
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/v1/organizations/org_x/tasks":
+			if err := json.NewDecoder(r.Body).Decode(&created); err != nil {
+				t.Errorf("create body: %v", err)
+			}
+			envelope(t, w, 201, map[string]any{"task": map[string]any{
+				"id": "tsk_3KF9TQ2P", "key": "BASE-3", "keyOrigin": "derived",
+				"epic":      map[string]any{"id": "epc_AB12CD34", "slug": "infra-baselining", "key": "EP-1"},
+				"milestone": map[string]any{"id": "mls_EF56GH78", "name": "03 — infrastructure"},
+			}})
+		case r.Method == http.MethodPut && r.URL.Path == "/v1/organizations/org_x/tasks/BASE-3/contract":
+			if err := json.NewDecoder(r.Body).Decode(&attached); err != nil {
+				t.Errorf("attach body: %v", err)
+			}
+			envelope(t, w, 200, map[string]any{"contractHash": attached.ContractHash, "syncedAt": "2026-01-01T00:00:00Z"})
+		default:
+			t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	out, err := runTaskCmd(t, newTaskCreateCommand(), srv.URL,
+		"--prefix", "BASE", "--title", "phase(03-infrastructure): d1, kv, db-migrate",
+		"--brief", "Land the data plane.", "--epic", "infra-baselining", "--milestone", "mls_EF56GH78",
+		"--assignee", "me", "--contract", tpl)
+	if err != nil {
+		t.Fatalf("task create: %v\n%s", err, out)
+	}
+	// The wire carries all five new fields verbatim (the plane's W3 create).
+	for k, want := range map[string]string{
+		"mintPrefix": "BASE", "titleMirror": "phase(03-infrastructure): d1, kv, db-migrate",
+		"brief": "Land the data plane.", "epic": "infra-baselining", "milestone": "mls_EF56GH78", "assignee": "me",
+	} {
+		if created[k] != want {
+			t.Errorf("create body %s = %v, want %q", k, created[k], want)
+		}
+	}
+	// An explicit empty gate list travels as gatesDefined — the fold's
+	// "merge alone finishes it" — not as a dropped array.
+	if attached.Contract["gatesDefined"] != true {
+		t.Fatalf("attach carried %+v — gatesDefined missing", attached.Contract)
+	}
+	if !strings.HasPrefix(attached.ContractHash, "sha256:") {
+		t.Fatalf("attach hash %q", attached.ContractHash)
+	}
+	for _, want := range []string{
+		"created BASE-3 (tsk_3KF9TQ2P) in milestone 03 — infrastructure",
+		"attached from " + tpl + " (merge alone finishes it)",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("want %q in:\n%s", want, out)
+		}
+	}
+}
+
+func TestTaskCreateRefusesBadTemplateBeforeMinting(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	initTempGit(t, dir)
+	tpl := filepath.Join(dir, "bad.yaml")
+	if err := os.WriteFile(tpl, []byte("apiVersion: orun.io/v1\nkind: TaskContract\nspec:\n  secerts: [X]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("the allocator must not be reached for a malformed template: %s %s", r.Method, r.URL.Path)
+	}))
+	defer srv.Close()
+	out, err := runTaskCmd(t, newTaskCreateCommand(), srv.URL, "--contract", tpl)
+	if err == nil || !strings.Contains(err.Error(), "--contract") {
+		t.Fatalf("expected a --contract error, got %v\n%s", err, out)
+	}
+}
+
+func TestTaskListFiltersByEpic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/organizations/org_x/tasks" || r.URL.Query().Get("epic") != "infra-baselining" || r.URL.Query().Get("assignee") != "me" {
+			t.Errorf("unexpected call %s %s", r.Method, r.URL.String())
+		}
+		envelope(t, w, 200, map[string]any{"tasks": []map[string]any{
+			{"id": "tsk_3KF9TQ2P", "key": "BASE-3", "titleMirror": "phase(03-infrastructure)",
+				"milestone": map[string]any{"id": "mls_EF56GH78", "name": "03 — infrastructure"}},
+		}})
+	}))
+	defer srv.Close()
+	out, err := runTaskCmd(t, newTaskListCommand(), srv.URL, "--epic", "infra-baselining", "--assignee", "me")
+	if err != nil {
+		t.Fatalf("task list: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "in milestone 03 — infrastructure") {
+		t.Fatalf("list output missing membership:\n%s", out)
+	}
+}
+
 func TestTaskCheckOfflineHappyPath(t *testing.T) {
 	writeTestDoc(t)
 	out, err := runTaskCmd(t, newTaskCheckCommand(), "", "ENG-1")

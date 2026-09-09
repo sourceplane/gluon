@@ -71,6 +71,48 @@ type rawDoc struct {
 // exists to prevent), as are wrong kinds and keys the allocator could never
 // have issued.
 func Parse(path string, body []byte) (*Document, error) {
+	raw, err := decode(path, body)
+	if err != nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(raw.Metadata.Name)
+	if !keyRe.MatchString(key) {
+		return nil, fmt.Errorf("taskfile %s: metadata.name %q is not a task key (ABC-123)", path, key)
+	}
+	if base := filepath.Base(path); base != key+Suffix {
+		return nil, fmt.Errorf("taskfile %s: file for task %q must be named %s", path, key, key+Suffix)
+	}
+	return &Document{Key: key, Path: path, Contract: raw.contract()}, nil
+}
+
+// ParseTemplate decodes a contract document that is not yet bound to a key
+// — the shape a bootstrap keeps beside its flows and hands to
+// `orun task create --contract` before the allocator has issued anything.
+// Same strict decoding as Parse; metadata.name is optional (kept as Key
+// when it is a valid key, so a bound document parses too) and the filename
+// is not checked. The returned Document has an empty Key when unbound.
+func ParseTemplate(path string, body []byte) (*Document, error) {
+	raw, err := decode(path, body)
+	if err != nil {
+		return nil, err
+	}
+	key := strings.TrimSpace(raw.Metadata.Name)
+	if key != "" && !keyRe.MatchString(key) {
+		return nil, fmt.Errorf("taskfile %s: metadata.name %q is not a task key (ABC-123) — omit it on a template", path, key)
+	}
+	return &Document{Key: key, Path: path, Contract: raw.contract()}, nil
+}
+
+// LoadTemplate reads and parses an unbound contract document at path.
+func LoadTemplate(path string) (*Document, error) {
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("taskfile: %w", err)
+	}
+	return ParseTemplate(path, body)
+}
+
+func decode(path string, body []byte) (*rawDoc, error) {
 	dec := yaml.NewDecoder(bytes.NewReader(body))
 	dec.KnownFields(true)
 	var raw rawDoc
@@ -83,13 +125,10 @@ func Parse(path string, body []byte) (*Document, error) {
 	if raw.Kind != wantKind {
 		return nil, fmt.Errorf("taskfile %s: kind %q (want %s)", path, raw.Kind, wantKind)
 	}
-	key := strings.TrimSpace(raw.Metadata.Name)
-	if !keyRe.MatchString(key) {
-		return nil, fmt.Errorf("taskfile %s: metadata.name %q is not a task key (ABC-123)", path, key)
-	}
-	if base := filepath.Base(path); base != key+Suffix {
-		return nil, fmt.Errorf("taskfile %s: file for task %q must be named %s", path, key, key+Suffix)
-	}
+	return &raw, nil
+}
+
+func (raw *rawDoc) contract() *contract.Contract {
 	c := &contract.Contract{
 		Goal:       raw.Spec.Goal,
 		Affects:    raw.Spec.Affects,
@@ -105,7 +144,7 @@ func Parse(path string, body []byte) (*Document, error) {
 		// carries it as gatesDefined (the TS twin drops empty arrays).
 		c.GatesDefined = len(*raw.Spec.Gates) == 0
 	}
-	return &Document{Key: key, Path: path, Contract: c}, nil
+	return c
 }
 
 // Load reads and parses the document at path.
