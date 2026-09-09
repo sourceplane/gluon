@@ -16,6 +16,11 @@ orun task attach   <key>            # seal tasks/<KEY>.TaskContract.yaml and upl
 orun task list     [--epic REF] [--milestone mls_…] [--assignee me|agents|REF]
 orun task show     <key|tsk_id>     # the task, where it belongs, its derived verdict
 orun task check    <key> [--base REF]   # offline: validity, completeness, affects vs diff
+
+orun task epic create      --name … [--slug …] [--description …] [--target-date …] [--owner me]
+orun task epic show        <epc_id|EP-n|slug>
+orun task epic list
+orun task milestone create --epic REF --name … [--after mls_…|--first] [--exit-criteria …]…
 ```
 
 ## `create` — one call, born clubbed and contracted
@@ -100,3 +105,33 @@ terms the cloud derives readiness from, and with `--base` the components
 the diff touched against the contract's `affects` ceiling. Advisory by
 construction — the workspace decides at enforcement, and effective access
 is always resolved policy ∩ contract.
+
+## Epics and milestones — the containers
+
+An **epic** is the programme tasks club under; a **milestone** is one of
+its phases, in order, carrying exit criteria. Both are orun-native objects
+here (a tracker-mirrored epic is the tracker's, and refuses authoring).
+
+```bash
+orun task epic create --name "Infra baselining" --slug infra-baselining --owner me
+orun task milestone create --epic infra-baselining --name "01 — scaffold" --first \
+  --exit-criteria "repo pushed + workspace-linked"
+orun task milestone create --epic infra-baselining --name "03 — infrastructure" \
+  --after mls_02FOUND1 --exit-criteria "WIRING_* secrets published on stage+prod"
+orun task epic show infra-baselining
+```
+
+- **A taken slug is adopted, not suffixed.** `epic create` on a slug the
+  workspace already has prints `epic <slug> already exists (<key>) —
+  reusing it` and exits 0 (`--json`: `{"epic": …, "existed": true}`), so a
+  re-run bootstrap or a retrying agent lands on the same epic instead of
+  minting a second one. Any other conflict is still an error.
+- **Position is spoken.** `--after mls_…` names the sibling the phase
+  follows; `--first` puts it first; neither puts it last. The server
+  derives the sort key between the neighbours, so nothing else renumbers.
+- **The same name twice makes two phases.** `milestone create` does not
+  dedupe by name; when you mean "ensure", read the epic first
+  (`epic show --json` lists `milestones[]`).
+- `epic show` prints the epic's own word beside the derived rollup
+  (`state orun: Planning · orun: 1/3 done`) and each phase's `done/total`,
+  folded from the tasks' verdicts at read.

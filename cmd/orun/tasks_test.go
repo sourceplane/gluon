@@ -329,6 +329,136 @@ func TestTaskListFiltersByEpic(t *testing.T) {
 	}
 }
 
+// BT-O2: the containers — an epic adopted on a taken slug, a phase placed
+// after its sibling, and the show read with both voices.
+func TestTaskEpicCreateAdoptsTakenSlug(t *testing.T) {
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/organizations/org_x/tasks/epics" {
+			t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
+		}
+		var req map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("body: %v", err)
+		}
+		if req["slug"] != "infra-baselining" || req["owner"] != "me" || req["name"] != "Infra baselining" {
+			t.Errorf("create body %v", req)
+		}
+		calls++
+		if calls == 1 {
+			envelope(t, w, 201, map[string]any{"epic": map[string]any{"id": "epc_AB12CD34", "slug": "infra-baselining", "key": "EP-1", "name": "Infra baselining"}})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(409)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{
+			"code": "conflict", "message": "slug is already taken in this workspace",
+			"details": map[string]any{"existing": map[string]any{"id": "epc_AB12CD34", "slug": "infra-baselining", "key": "EP-1"}},
+		}})
+	}))
+	defer srv.Close()
+
+	args := []string{"--name", "Infra baselining", "--slug", "infra-baselining", "--owner", "me"}
+	out, err := runTaskCmd(t, newTaskEpicCreateCommand(), srv.URL, args...)
+	if err != nil || !strings.Contains(out, "created epic infra-baselining (EP-1, epc_AB12CD34)") {
+		t.Fatalf("first create: %v\n%s", err, out)
+	}
+	out, err = runTaskCmd(t, newTaskEpicCreateCommand(), srv.URL, append(args, "--json")...)
+	if err != nil {
+		t.Fatalf("second create must adopt, got %v\n%s", err, out)
+	}
+	var got struct {
+		Existed bool `json:"existed"`
+		Epic    struct {
+			ID string `json:"id"`
+		} `json:"epic"`
+	}
+	if jerr := json.Unmarshal([]byte(out), &got); jerr != nil || !got.Existed || got.Epic.ID != "epc_AB12CD34" {
+		t.Fatalf("adopt json: %v\n%s", jerr, out)
+	}
+}
+
+func TestTaskEpicCreateSurfacesOtherConflicts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(409)
+		_ = json.NewEncoder(w).Encode(map[string]any{"error": map[string]any{"code": "conflict", "message": "something else"}})
+	}))
+	defer srv.Close()
+	if _, err := runTaskCmd(t, newTaskEpicCreateCommand(), srv.URL, "--name", "X"); err == nil {
+		t.Fatal("a conflict without a holder must stay an error")
+	}
+}
+
+func TestTaskMilestoneCreatePositions(t *testing.T) {
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/organizations/org_x/tasks/epics/infra-baselining/milestones" {
+			t.Errorf("unexpected call %s %s", r.Method, r.URL.Path)
+		}
+		var buf bytes.Buffer
+		_, _ = buf.ReadFrom(r.Body)
+		bodies = append(bodies, buf.String())
+		envelope(t, w, 201, map[string]any{"milestone": map[string]any{"id": "mls_EF56GH78", "epicId": "epc_AB12CD34", "name": "03 — infrastructure"}})
+	}))
+	defer srv.Close()
+
+	out, err := runTaskCmd(t, newTaskMilestoneCreateCommand(), srv.URL,
+		"--epic", "infra-baselining", "--name", "03 — infrastructure",
+		"--exit-criteria", "WIRING_* published", "--exit-criteria", "convergence green", "--after", "mls_02FOUND1")
+	if err != nil || !strings.Contains(out, "created milestone 03 — infrastructure (mls_EF56GH78) in epic infra-baselining") {
+		t.Fatalf("milestone create: %v\n%s", err, out)
+	}
+	if _, err := runTaskCmd(t, newTaskMilestoneCreateCommand(), srv.URL, "--epic", "infra-baselining", "--name", "01 — scaffold", "--first"); err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	if _, err := runTaskCmd(t, newTaskMilestoneCreateCommand(), srv.URL, "--epic", "infra-baselining", "--name", "08 — docs"); err != nil {
+		t.Fatalf("last: %v", err)
+	}
+	// The three positions the server distinguishes: a sibling, an explicit
+	// null (first), and the key absent (last).
+	want := []string{`"after":"mls_02FOUND1"`, `"after":null`, ""}
+	for i, w := range want {
+		if w != "" && !strings.Contains(bodies[i], w) {
+			t.Errorf("body %d = %s, want %s", i, bodies[i], w)
+		}
+		if w == "" && strings.Contains(bodies[i], `"after"`) {
+			t.Errorf("body %d = %s, want no after key", i, bodies[i])
+		}
+	}
+	if !strings.Contains(bodies[0], `"exitCriteria":["WIRING_* published","convergence green"]`) {
+		t.Errorf("exit criteria: %s", bodies[0])
+	}
+	if _, err := runTaskCmd(t, newTaskMilestoneCreateCommand(), srv.URL, "--epic", "e", "--name", "n", "--first", "--after", "mls_X"); err == nil {
+		t.Fatal("--first with --after must refuse")
+	}
+}
+
+func TestTaskEpicShowRendersBothVoices(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v1/organizations/org_x/tasks/epics/infra-baselining" || r.URL.Query().Get("include") != "rollup" {
+			t.Errorf("unexpected call %s %s", r.Method, r.URL.String())
+		}
+		envelope(t, w, 200, map[string]any{
+			"epic":       map[string]any{"id": "epc_AB12CD34", "slug": "infra-baselining", "key": "EP-1", "name": "Infra baselining", "state": "Planning", "owner": "sp_1"},
+			"milestones": []map[string]any{{"id": "mls_1", "name": "01 — scaffold"}, {"id": "mls_3", "name": "03 — infrastructure"}},
+			"taskCount":  3,
+			"rollup": map[string]any{"total": 3, "done": 1, "blocked": 0, "rungs": map[string]int{"done": 1, "in_review": 2},
+				"milestones": []map[string]any{{"id": "mls_1", "name": "01 — scaffold", "total": 1, "done": 1}, {"id": "mls_3", "name": "03 — infrastructure", "total": 2, "done": 0}}},
+		})
+	}))
+	defer srv.Close()
+	out, err := runTaskCmd(t, newTaskEpicShowCommand(), srv.URL, "infra-baselining")
+	if err != nil {
+		t.Fatalf("epic show: %v\n%s", err, out)
+	}
+	for _, want := range []string{"infra-baselining  EP-1  epc_AB12CD34", "state     orun: Planning · orun: 1/3 done", "owner     sp_1", "mls_3", "0/2", "1/1"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("want %q in:\n%s", want, out)
+		}
+	}
+}
+
 func TestTaskCheckOfflineHappyPath(t *testing.T) {
 	writeTestDoc(t)
 	out, err := runTaskCmd(t, newTaskCheckCommand(), "", "ENG-1")
