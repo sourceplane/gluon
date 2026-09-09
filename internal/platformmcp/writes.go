@@ -9,7 +9,8 @@ import (
 	"github.com/sourceplane/orun/internal/remotestate"
 )
 
-// The 6 write tools (orun-mcp UM2, design §3). Write rails: every write
+// The 9 write tools (orun-mcp UM2, design §3; the three task-plane
+// writes joined at orun-baseline-tracking BT-O3 — see tasks.go). Write rails: every write
 // carries an Idempotency-Key — a caller-supplied one passed through verbatim
 // (validated to 1-255 printable ASCII, the manifest contract) or a fresh
 // `mcp_<uuid>` minted per logical attempt; retries at the transport replay
@@ -107,6 +108,9 @@ func (p *Provider) callWrite(ctx context.Context, name string, a argmap) (string
 			return "", err
 		}
 		return emit("replayed webhook delivery "+a.str("delivery")+" — this is the new attempt", page)
+
+	case "task_create", "epic_create", "milestone_create":
+		return p.callTaskWrite(ctx, name, a, ws, key)
 
 	case "member_invite":
 		if err := requireStr(a, name, "email", "role"); err != nil {

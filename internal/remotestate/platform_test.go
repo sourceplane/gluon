@@ -181,8 +181,8 @@ func TestPlatformWritePaths(t *testing.T) {
 	body := map[string]interface{}{"name": "api"}
 
 	calls := []struct {
-		name string
-		do   func() (*remotestate.PlatformPage, error)
+		name                           string
+		do                             func() (*remotestate.PlatformPage, error)
 		wantMethod, wantPath, wantBody string
 	}{
 		{"CreateProject", func() (*remotestate.PlatformPage, error) { return c.CreateProject(ctx, "ws_1", body, "key-1") },

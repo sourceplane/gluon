@@ -120,8 +120,8 @@ func TestFullyMountedAssemblyRoster(t *testing.T) {
 	}
 	// 73 → 29 at WT2: the 45-tool work plane is gone; what mounts beside
 	// the platform roster is the pen it used to carry.
-	if len(tools) != 29 {
-		t.Fatalf("fully mounted roster = %d tools, want 29 (1 pen + 27 platform + connection_info — WT2)", len(tools))
+	if len(tools) != 35 {
+		t.Fatalf("fully mounted roster = %d tools, want 35 (1 pen + 33 platform + connection_info — BT-O3)", len(tools))
 	}
 	last := tools[len(tools)-1].(map[string]interface{})
 	if last["name"] != "connection_info" {

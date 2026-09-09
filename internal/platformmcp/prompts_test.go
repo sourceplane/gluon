@@ -113,8 +113,8 @@ func TestPromptToolDriftGuard(t *testing.T) {
 	}
 	// 73 → 29 at WT2: the 45-tool work plane is gone, and the pen it used
 	// to carry stands on its own.
-	if len(roster) != 29 {
-		t.Fatalf("composed roster = %d tools, want 29 (1 pen + 27 platform + 1 built-in — WT2)", len(roster))
+	if len(roster) != 35 {
+		t.Fatalf("composed roster = %d tools, want 35 (1 pen + 33 platform + 1 built-in — BT-O3)", len(roster))
 	}
 
 	tokenPattern := regexp.MustCompile(`\b[a-z]+(?:_[a-z]+)+\b`)

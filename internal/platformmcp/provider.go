@@ -48,6 +48,18 @@ type PlatformAPI interface {
 	ListSkills(ctx context.Context, org string) (*remotestate.SkillsList, error)
 	GetSkill(ctx context.Context, org, name, rev string) (*remotestate.SkillView, error)
 
+	// The task plane (orun-tasks M1/M2 + orun-baseline-tracking BT-O3):
+	// typed reads over the same client the CLI's `orun task` verbs use.
+	ListTasksWhere(ctx context.Context, org string, filter remotestate.TaskListFilter) (*remotestate.TasksList, error)
+	GetTask(ctx context.Context, org, ref string) (*remotestate.PublicTask, error)
+	GetTaskContract(ctx context.Context, org, ref string) (*remotestate.TaskContractView, error)
+	GetTaskVerdict(ctx context.Context, org, ref string) (*remotestate.TaskVerdictView, error)
+	GetEpic(ctx context.Context, org, ref string) (*remotestate.EpicView, error)
+	GetMilestone(ctx context.Context, org, ref string) (*remotestate.MilestoneView, error)
+	GetContainerContract(ctx context.Context, org, container, ref string) (*remotestate.ContainerContractView, error)
+	ListEpicDocs(ctx context.Context, org, epicRef string) (*remotestate.EpicDocsList, error)
+	GetEpicDoc(ctx context.Context, org, epicRef, slug string) (*remotestate.EpicDocView, error)
+
 	// Writes (UM2): each carries the per-attempt Idempotency-Key.
 	CreateProject(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
 	CreateProjectEnvironment(ctx context.Context, org, project string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
@@ -57,13 +69,23 @@ type PlatformAPI interface {
 	CreateWebhookSubscription(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
 	ReplayWebhookDelivery(ctx context.Context, org, attemptID, idemKey string) (*remotestate.PlatformPage, error)
 	CreateInvitation(ctx context.Context, org string, body interface{}, idemKey string) (*remotestate.PlatformPage, error)
+	// Task-plane writes (BT-O3): the allocator, the contract seal, the
+	// containers — each under the attempt's Idempotency-Key.
+	CreateTaskWithKey(ctx context.Context, org string, req remotestate.TaskCreateRequest, idemKey string) (*remotestate.PublicTask, error)
+	AttachTaskContractWithKey(ctx context.Context, org, ref string, contractWire json.RawMessage, contractHash, idemKey string) (*remotestate.TaskContractSeal, error)
+	CreateEpicWithKey(ctx context.Context, org string, req remotestate.EpicCreateRequest, idemKey string) (*remotestate.PublicEpic, error)
+	CreateMilestoneWithKey(ctx context.Context, org, epicRef string, req remotestate.MilestoneCreateRequest, idemKey string) (*remotestate.PublicMilestone, error)
 }
+
+// The real client satisfies the seam — checked here so a wire method the
+// plane grows is a compile error, never a runtime surprise.
+var _ PlatformAPI = (*remotestate.Client)(nil)
 
 // Provider is the platform-plane mcpserve.ToolProvider. DefaultWorkspace,
 // when set (the serve-time resolved scope), fills an absent `workspace`
 // argument and makes it optional on the advertised schemas; an explicit
 // argument always wins. ReadOnly filters the 6 write tools out of the
-// advertised roster (and blocks their execution): 19 tools instead of 25.
+// advertised roster (and blocks their execution): 24 tools instead of 33.
 type Provider struct {
 	API              PlatformAPI
 	DefaultWorkspace string
@@ -535,6 +557,9 @@ func (p *Provider) call(ctx context.Context, name string, a argmap) (string, err
 			return "", err
 		}
 		return emit(view.Name+" @ "+truncate(view.Rev)+" ("+view.Source+")", view)
+
+	case "task_list", "task_get", "policy_preview":
+		return p.callTaskRead(ctx, name, a)
 
 	case "webhook_deliveries_list":
 		if endpoint := a.str("endpoint"); endpoint != "" {

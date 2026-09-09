@@ -7,17 +7,18 @@ title: orun mcp
 dependency-free JSON-RPC 2.0 server over stdio that gives an agent hands on
 everything orun through a single connection.
 
-One loop composes two tool planes — **28 tools under one initialize**, plus
+One loop composes two tool planes — **34 tools under one initialize**, plus
 the built-in `connection_info`:
 
 - **The pen plane** (1 tool) — `pr_open` writes a PR's lineage: the branch
   renamed onto the grammar, pushed, and the machine-readable manifest in the
   body. Mounted whenever the server runs inside a repository checkout — it
   needs git, not a credential.
-- **The platform plane** (27 tools) — the Orun Cloud public API: catalog,
+- **The platform plane** (33 tools) — the Orun Cloud public API: catalog,
   runs and logs, audit, events, access, usage, billing, config, secret
-  metadata, webhooks, skills. 21 reads plus 6 policy-gated writes. Mounted
-  whenever cloud auth resolves.
+  metadata, webhooks, skills, and the task plane (tasks, epics,
+  milestones, contracts, derived verdicts). 24 reads plus 9 policy-gated
+  writes. Mounted whenever cloud auth resolves.
 
 ```bash
 orun mcp serve
@@ -91,7 +92,7 @@ orun mcp serve [--workspace <ref>] [--backend-url <url>] [--read-only]
 | --- | --- |
 | `--workspace <ref>` | Target workspace (org id or slug; defaults to the linked repo's). Becomes the platform tools' default `workspace`. |
 | `--backend-url <url>` | Backend URL (Orun Cloud or self-hosted). |
-| `--read-only` | Drop the 6 platform write tools from the roster (22 tools instead of 28). Filtered from `tools/list` *and* blocked at execution. |
+| `--read-only` | Drop the 9 platform write tools from the roster (25 tools instead of 34). Filtered from `tools/list` *and* blocked at execution. |
 
 `--read-only` deliberately does **not** touch `pr_open`. The flag scopes what
 the server may change *in the cloud*; the pen changes your checkout and your
@@ -123,7 +124,7 @@ Orun Cloud's `orun/compliance` check verifies them on the PR itself.
 Outside a repository checkout the tool is not mounted at all, and
 `connection_info` reports the reason rather than the server guessing at git.
 
-## The platform plane (27 tools)
+## The platform plane (33 tools)
 
 Every platform tool calls the Orun Cloud public API with **your own
 credential** — RBAC, rate limits, audit, and metering apply exactly as they
@@ -179,10 +180,27 @@ would to you. Results are one summary line plus compact JSON, byte-capped at
 | `secrets_list` | Secret **metadata** only (keys, versions, rotation state) — values are write-only platform-wide |
 | `webhook_deliveries_list` | Webhook endpoints; pass `endpoint` to page through its delivery attempts |
 
+### The task plane
+
+| Tool | Purpose |
+| --- | --- |
+| `task_list` | The workspace's tasks — key, title, epic/milestone membership, whether a contract is attached; narrow with `epic`, `milestone`, `assignee` (`me`, `agents`, or a subject ref) |
+| `task_get` | One ref, the full picture: a task's contract + derived verdict (rung, the observation behind it, dependencies, evidence); an epic's status beside its rollup, container contract and spec docs; a milestone with its epic |
+| `policy_preview` | "If this contract were attached, which secrets would stop resolving?" — the exact narrow-only intersection enforcement uses, before anything is attached |
+
+The verdict is derived from what the platform observed — a branch on the
+`orun/<KEY>-<slug>` grammar, an open PR, a merge, gate results — never a
+typed status. A merged PR folds a task to `done` only when its contract
+declared its gates (an explicit empty list means "merge alone finishes
+it"), which is why `task_create` can attach a contract in the same call.
+
 ### Writes (dropped by `--read-only`)
 
 | Tool | Purpose |
 | --- | --- |
+| `task_create` | Create a task — key from the allocator (adopt / derive / mint), clubbed under an `epic` and/or `milestone`, with a `brief`, an `assignee`, and an optional `contract` attached under the same idempotency attempt |
+| `epic_create` | Create an epic; a slug already taken comes back as the existing epic with `existed: true`, so re-runs adopt instead of duplicating |
+| `milestone_create` | Add a phase to an epic, positioned with `after` (`mls_…` | `null` = first | omitted = last), with exit criteria |
 | `project_create` | Create a project in a workspace |
 | `environment_create` | Create an environment under a project |
 | `flag_set` | Create or update a feature flag at one config scope |
@@ -203,7 +221,7 @@ can reason about (`forbidden: … (requestId: …)`), never protocol faults.
 
 ## One contract, two implementations
 
-The platform tools are the same 25 served by the hosted remote MCP server
+The platform tools are the same 33 served by the hosted remote MCP server
 (Streamable HTTP, part of Orun Cloud) — **identical names, schemas, and
 semantics**, so prompts and docs are portable between the local and remote
 surfaces. The contract is a machine-readable tool manifest exported from the
