@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -68,12 +69,15 @@ func loadSessionSkillPins() []provenance.SkillPin {
 
 func newPrOpenCommand() *cobra.Command {
 	var (
-		asJSON  bool
-		task    string
-		title   string
-		base    string
-		draft   bool
-		session string
+		asJSON     bool
+		task       string
+		title      string
+		base       string
+		draft      bool
+		session    string
+		branchSlug string
+		epic       string
+		bodyFile   string
 	)
 	cmd := &cobra.Command{
 		Use:   "open",
@@ -93,10 +97,15 @@ prints the compare URL plus the body to paste — honest either way.`,
 				return fmt.Errorf("orun pr open: --task is required — a PR opens FOR a task")
 			}
 			manifest := provenance.Manifest{Version: provenance.ManifestVersion,
-				Skills: loadSessionSkillPins(), Session: session}
+				Epic: epic, Skills: loadSessionSkillPins(), Session: session}
+			prose, err := readBodyFile(cmd, bodyFile)
+			if err != nil {
+				return fmt.Errorf("orun pr open: %w", err)
+			}
 			pen := &provenance.Pen{Workdir: ".", Token: cliauth.GitHubTokenFromEnv}
 			out, err := pen.Open(ctx, provenance.OpenRequest{
 				TaskKey: task, Title: title, Base: base, Draft: draft, Manifest: manifest,
+				BranchSlug: branchSlug, Prose: prose,
 			})
 			if err != nil {
 				if out != nil && out.CompareURL != "" {
@@ -120,8 +129,31 @@ prints the compare URL plus the body to paste — honest either way.`,
 	cmd.Flags().StringVar(&base, "base", "main", "base branch")
 	cmd.Flags().BoolVar(&draft, "draft", false, "open as a draft")
 	cmd.Flags().StringVar(&session, "session", os.Getenv("ORUN_SESSION"), "session id for the manifest")
+	cmd.Flags().StringVar(&branchSlug, "branch-slug", "", "slug half of the branch verbatim (orun/<task>-<slug>) instead of slugifying the title; [a-z0-9-]")
+	cmd.Flags().StringVar(&epic, "epic", "", "the epic this task belongs to, for the manifest (epc_… or its slug)")
+	cmd.Flags().StringVar(&bodyFile, "body-file", "", "file with the PR body's prose ('-' for stdin); the manifest block is appended")
 	cmd.Flags().BoolVar(&asJSON, "json", false, "emit JSON")
 	return cmd
+}
+
+// readBodyFile reads the prose half of the body: a path, "-" for stdin, or
+// nothing.
+func readBodyFile(cmd *cobra.Command, path string) (string, error) {
+	switch path {
+	case "":
+		return "", nil
+	case "-":
+		b, err := io.ReadAll(cmd.InOrStdin())
+		if err != nil {
+			return "", fmt.Errorf("--body-file -: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("--body-file: %w", err)
+	}
+	return string(b), nil
 }
 
 func newPrCheckCommand() *cobra.Command {

@@ -181,3 +181,59 @@ func TestPenOpen(t *testing.T) {
 		t.Errorf("branch = %s", out.Branch)
 	}
 }
+
+// BT-O4: a flow names its landing's branch and the epic in the manifest,
+// and reads the PR number back.
+func TestPenOpenBranchSlugAndEpic(t *testing.T) {
+	var gitCalls []string
+	fakeGit := func(_ context.Context, args ...string) (string, error) {
+		gitCalls = append(gitCalls, strings.Join(args, " "))
+		switch args[0] {
+		case "rev-parse":
+			return "tmp-landing", nil
+		case "remote":
+			return "https://github.com/sourceplane/acme.git", nil
+		}
+		return "", nil
+	}
+	var posted map[string]interface{}
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&posted)
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"html_url":"https://github.com/sourceplane/acme/pull/3","number":3}`))
+	}))
+	defer api.Close()
+	pen := &Pen{RunGit: fakeGit, Token: func() string { return "tok" }, APIBase: api.URL, HTTP: api.Client()}
+	out, err := pen.Open(context.Background(), OpenRequest{
+		TaskKey: "BASE-3", Title: "phase(03-infrastructure): d1, kv, db-migrate", BranchSlug: "03-infrastructure",
+		Prose: "Automated phase landing.", Manifest: Manifest{Version: 1, Epic: "infra-baselining"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Branch != "orun/BASE-3-03-infrastructure" || out.Number != 3 || !out.Opened {
+		t.Fatalf("out = %+v", out)
+	}
+	if !strings.Contains(strings.Join(gitCalls, ";"), "checkout -B orun/BASE-3-03-infrastructure") {
+		t.Errorf("git calls = %v", gitCalls)
+	}
+	body, _ := posted["body"].(string)
+	if !strings.HasPrefix(body, "Automated phase landing.\n\n<!-- orun:manifest") {
+		t.Errorf("body = %q", body)
+	}
+	m, perr := ParseManifest(body)
+	if perr != nil || m.Task != "BASE-3" || m.Epic != "infra-baselining" {
+		t.Fatalf("manifest = %+v (%v)", m, perr)
+	}
+	if TaskKeyOfBranch(out.Branch) != "BASE-3" {
+		t.Errorf("branch %s does not parse back to its key", out.Branch)
+	}
+	// A slug outside the grammar's alphabet is refused before any git call.
+	gitCalls = nil
+	if _, err := pen.Open(context.Background(), OpenRequest{TaskKey: "BASE-3", BranchSlug: "03_Infra"}); err == nil {
+		t.Fatal("bad slug accepted")
+	}
+	if len(gitCalls) > 1 {
+		t.Errorf("git touched after a refused slug: %v", gitCalls)
+	}
+}
